@@ -1,4 +1,4 @@
-# Smoking History Generation Code Archive
+# Smoking History Generator Accuracy and Equity Code Archive
 
 Hesam Mahmoudi  
 Lung Cancer Policy Team (LCP)  
@@ -7,7 +7,7 @@ Massachusetts General Hospital (MGH)
 Harvard Medical School  
 Prepared: 2026-05-04
 
-This folder contains the code files prepared for public sharing alongside the manuscript appendix.
+This folder contains the code files prepared for public sharing alongside the manuscript appendix. The archived code evaluates the accuracy of Smoking History Generator-simulated smoking histories, their implications for lung cancer screening eligibility, and related equity concerns across SCCS, MECS, and BRFSS.
 
 Included files:
 
@@ -24,7 +24,7 @@ The three R Markdown files contain the cohort-specific analysis code for:
 - MECS
 - BRFSS
 
-The Python file contains the aggregate post-processing code that combines completed cohort-level exports into manuscript-ready summary tables and figures.
+The Python file contains the aggregate post-processing code that combines completed cohort-level exports into manuscript-ready summary tables and figures aligned with the manuscript's cross-cohort accuracy and screening-eligibility analyses.
 
 ## Aggregate Script
 
