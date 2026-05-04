@@ -1,0 +1,4775 @@
+---
+title: "SHG MECS data"
+author: |
+  Hesam Mahmoudi  
+  Lung Cancer Policy Team (LCP)  
+  MGB Center for Health Technology Assessment (CHTA)  
+  Massachusetts General Hospital (MGH),  
+  Harvard Medical School  
+date: "Started: 2024-02-10 \\ Finalized: 2025-05-05"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)     # includes ggplot2, dplyr, tidyr, tibble, stringr, etc.
+library(patchwork)     # for combining plots
+library(kableExtra)    # for styled tables
+library(flextable)     # for Word table formatting
+library(officer)       # for Word/PowerPoint export
+library(openxlsx)      # for Excel export
+library(haven)         # for reading SPSS/SAS/Stata files
+library(htmltools)     # For building custom HTML widgets
+library(webshot2)
+library(cowplot)
+```
+
+## Functions
+#SHG_Setup
+This function prepares the input file (input_r.txt) for the simulation executable. It accepts parameters like Sex, YOB, Population, and optional values such as Seed, Race, Path, and Version. The function modifies a template file, updates it with the specified values, and writes the customized file to the simulation directory.
+ 
+```{r}
+SHG_Setup <- function(Sex, YOB, Population, 
+                      Seed = 1, Race = 0, Path = "SHG6.3.4", Version = 2023) {
+  
+  # Validate inputs
+  if (!Version %in% c(2023, 2017)) {
+    stop("Version must be 2023 or 2017.")
+  }
+  
+  # Determine the file paths based on the Version
+  prob_paths <- if (Version == 2023) {
+    list(
+      INIT_PROB = "SHG6.3.4/data/06_21_2023/lbc_shg_initiation06212023.txt",
+      CESS_PROB = "SHG6.3.4/data/06_21_2023/lbc_shg_cessation06212023.txt",
+      OCD_PROB  = "SHG6.3.4/data/06_21_2023/lbc_smokehist_ac_mortality_02212016.txt",
+      CPD_DATA  = "SHG6.3.4/data/06_21_2023/lbc_shg_cpd06212023.txt"
+    )
+  } else {
+    list(
+      INIT_PROB = "SHG6.3.4/data/05_03_2017/lbc_shg_initiation05032017.txt",
+      CESS_PROB = "SHG6.3.4/data/05_03_2017/lbc_shg_cessation05032017.txt",
+      OCD_PROB  = "SHG6.3.4/data/05_03_2017/lbc_smokehist_ac_mortality_02212016.txt",
+      CPD_DATA  = "SHG6.3.4/data/05_03_2017/lbc_shg_cpd05032017.txt"
+    )
+  }
+  
+  # Path to the input template
+  input_template_path <- file.path(Path, "SHG_input_temp.txt")
+  if (!file.exists(input_template_path)) {
+    stop(paste("Template file not found at:", input_template_path))
+  }
+  
+  # Read the input template
+  input_text <- readLines(input_template_path)
+  
+  # Replace placeholders in the template
+  modified_text <- input_text %>%
+    gsub("{seed1}", Seed, ., fixed = TRUE) %>%
+    gsub("{seed2}", Seed, ., fixed = TRUE) %>%
+    gsub("{seed3}", Seed, ., fixed = TRUE) %>%
+    gsub("{seed4}", Seed, ., fixed = TRUE) %>%
+    gsub("RACE=0", paste0("RACE=", Race), ., fixed = TRUE) %>%
+    gsub("SEX=0", paste0("SEX=", Sex), ., fixed = TRUE) %>%
+    gsub("{cohort}", YOB, ., fixed = TRUE) %>%
+    gsub("REPEAT=100000", paste0("REPEAT=", Population), ., fixed = TRUE) %>%
+    gsub("INIT_PROB=SHG6.3.4/data/06_21_2023/lbc_shg_initiation06212023.txt", 
+         paste0("INIT_PROB=", prob_paths$INIT_PROB), ., fixed = TRUE) %>%
+    gsub("CESS_PROB=SHG6.3.4/data/06_21_2023/lbc_shg_cessation06212023.txt", 
+         paste0("CESS_PROB=", prob_paths$CESS_PROB), ., fixed = TRUE) %>%
+    gsub("OCD_PROB=SHG6.3.4/data/06_21_2023/lbc_smokehist_oc_mortality_02212016.txt", 
+         paste0("OCD_PROB=", prob_paths$OCD_PROB), ., fixed = TRUE) %>%
+    gsub("CPD_DATA=SHG6.3.4/data/06_21_2023/lbc_shg_cpd06212023.txt", 
+         paste0("CPD_DATA=", prob_paths$CPD_DATA), ., fixed = TRUE)
+  
+  # Path to the output file
+  output_file_path <- file.path(Path, "input_r.txt")
+  
+  # Write the modified text to the output file
+  writeLines(modified_text, output_file_path)
+  
+  # Notify the user
+  message("Modified input file written to: ", output_file_path)
+}
+```
+
+
+#SHG_Run
+This function executes the simulation executable (lbc_smokehist_win.exe) using a specified input file (input_r.txt). After running the simulation, it checks for the existence of the output file (output_r.out) to confirm success. The function reports an error if the output file is not generated.
+
+```{r}
+SHG_Run <- function(Path = "SHG6.3.4") {
+  # Define paths for the input file, executable, and output file
+  input_file <- file.path(Path, "input_r.txt")
+  exe_file <- file.path(Path, "lbc_smokehist_win.exe")
+  output_file <- file.path("output_r.out")
+  
+  # Check if the executable and input file exist
+  if (!file.exists(exe_file)) {
+    stop(paste("Executable not found at:", exe_file))
+  }
+  if (!file.exists(input_file)) {
+    stop(paste("Input file not found at:", input_file))
+  }
+  
+  # Build the command to execute
+  command <- paste(shQuote(exe_file), shQuote(input_file))
+  
+  # Run the command
+  message("Running command: ", command)
+  system(command, wait = TRUE)
+  
+  # Check for the output file
+  if (file.exists(output_file)) {
+    message("Success: Output file created at ", output_file)
+  } else {
+    stop("Error: Output file not found after running the executable.")
+  }
+}
+```
+
+
+#SHG_Output
+This function reads and processes the output file (output_r.out) generated by the simulation executable. It extracts individual-level simulation results such as smoking initiation, cessation, and death ages, as well as yearly smoking data (cigarettes per day). The results are returned in a structured dataframe for further analysis.
+
+```{r}
+SHG_Output <- function(outfile = "output_r.out") {
+  # Check if the output file exists
+  if (!file.exists(outfile)) {
+    stop(paste("Output file not found:", outfile))
+  }
+  
+  # Read the contents of the output file
+  file_lines <- readLines(outfile)
+  
+  # Find the <RUN> section
+  run_start <- grep("<RUN>", file_lines)
+  run_end <- grep("</RUN>", file_lines)
+  
+  if (length(run_start) == 0 || length(run_end) == 0) {
+    stop("The <RUN> section is missing in the output file.")
+  }
+  
+  # Extract the lines within the <RUN> section
+  run_lines <- file_lines[(run_start + 1):(run_end - 1)]
+  
+  # Initialize an empty list to hold the data for each individual
+  rows <- list()
+  
+  # Loop through each line in the <RUN> section
+  for (line in run_lines) {
+    # Split the line by semicolons
+    parts <- unlist(strsplit(line, ";"))
+    
+    # Extract the first six values
+    race <- as.numeric(parts[1])
+    sex <- as.numeric(parts[2])
+    yob <- as.numeric(parts[3])
+    initiation_age <- as.numeric(parts[4])
+    cessation_age <- as.numeric(parts[5])
+    death_age <- as.numeric(parts[6])
+    if (death_age==-999){
+      death_age <- 109
+    }
+    
+    # Initialize a vector to store CPD values for ages 1 to 110
+    cpd_values <- rep(0, 110)
+    
+    # Check if there are CPD values in the line
+    if (length(parts) > 6) {
+      # Extract the remaining values after the first six
+      age_cpd_pairs <- as.numeric(parts[7:length(parts)])
+      
+      # Loop through the age-CPD pairs
+      for (i in seq(1, length(age_cpd_pairs), by = 2)) {
+        age <- age_cpd_pairs[i]
+        cpd <- age_cpd_pairs[i + 1]
+        
+        # Stop if we've passed cessation or death age
+        if (!is.na(cessation_age) && age > cessation_age && cessation_age!=-999) break
+        if (!is.na(death_age) && age > death_age) break
+        
+        # Assign the CPD value for the given age
+        cpd_values[age] <- cpd
+      }
+    }
+    
+    # Combine the data into a row
+    row <- c(race, sex, yob, initiation_age, cessation_age, death_age, cpd_values)
+    rows <- append(rows, list(row))
+  }
+  
+  # Create a dataframe from the rows
+  column_names <- c("Race", "Sex", "YOB", "Initiation_Age", "Cessation_Age", "Death_Age", 1:110)
+  SHG_out <- as.data.frame(do.call(rbind, rows))
+  colnames(SHG_out) <- column_names
+  
+  return(SHG_out)
+}
+```
+
+
+#SHG_rslts_ini
+This function initializes an empty dataframe for storing simulation results. The dataframe contains columns for key variables such as Sex, Race, YOB, Age, Initiation_Age, Cessation_Age, Eversmoker, Smokenow, CigsPerDay, Pack_Years, and Smoking_Years. It provides a structured container to accumulate and manage simulation data.
+
+```{r}
+SHG_rslts_ini <- function() {
+    # Initialize aggr_out with specified columns
+    df_name <- data.frame(
+      Sex = integer(),
+      Race = integer(),
+      YOB = integer(),
+      Age = integer(),
+      Initiation_Age = integer(),
+      Cessation_Age = integer(),
+      Quit_Age = integer(),
+      Eversmoker = integer(),
+      Smokenow = integer(),
+      CigsPerDay = numeric(),
+      Pack_Years_Minusone = numeric(),
+      Pack_Years = numeric(),
+      Smoking_Years = integer(),
+      Smoking_Years_Minusone = integer(),
+      stringsAsFactors = FALSE
+    )
+    return(df_name)
+}
+```
+
+
+#SHG_Aggr
+This function aggregates simulation results (shgrun_out) into a dataframe (aggr_out) for analysis. It calculates individual attributes like smoking status, cigarettes per day, pack years, and smoking years based on simulation inputs and outputs. The function also ensures that only individuals alive at the data collection year are included. If aggr_out is not already initialized, it creates it.
+
+```{r}
+SHG_Aggr <- function(shgrun_out, aggr_out, collection_year, exclude_deceased = "On") {
+  for (i in seq_len(nrow(shgrun_out))) {
+    # Extract values from shgrun_out
+    row <- shgrun_out[i, ]
+    sex <- row$Sex
+    race <- row$Race
+    yob <- row$YOB
+    initiation_age <- row$Initiation_Age
+    cessation_age <- row$Cessation_Age
+    death_age <- row$Death_Age
+
+    # Calculate age
+    age <- collection_year - yob
+
+    # Exclude deceased individuals if the option is "On"
+    if (exclude_deceased == "On" && age > death_age) {
+      next  # Skip this individual
+    }
+
+    # Determine if the individual is an EverSmoker
+    eversmoker <- ifelse(initiation_age == -999 | initiation_age > age, 0, 1)
+
+    # Initialize derived values
+    smokenow <- 0
+    cigs_per_day <- 0
+    pack_years <- 0
+    pack_years_minusone <- 0
+    smoking_years <- 0
+    smoking_years_minusone <- 0
+    quit_age <- 0
+    
+    # Check if the individual has smoked all the way through their life
+    if (cessation_age < 0 & initiation_age > 0) {
+      cessation_age <- death_age
+    }
+    
+    if (eversmoker == 1) {
+      # Check if the individual is currently smoking
+      if (age > initiation_age & age <= cessation_age) {
+        smokenow <- 1
+      }
+      
+      quit_age <- cessation_age+1
+
+      # Extract smoking data from ages 1 to current age
+      smoking_data <- as.numeric(row[7:(6 + age)])  # Columns 7 to (6 + age)
+
+      # Calculate non-zero average for CigsPerDay
+      cigs_per_day <- mean(smoking_data[smoking_data > 0], na.rm = TRUE)
+
+      # Calculate Pack Years (sum of all smoking data divided by 20)
+      pack_years <- sum(smoking_data, na.rm = TRUE) / 20
+
+      # Calculate Smoking Years
+      if (!is.na(cessation_age)) {
+        if (cessation_age >= age) {
+          smoking_years <- age - initiation_age + 1  # Individual hasn't quit smoking yet
+          smoking_years_minusone <- age - initiation_age
+        } else if (cessation_age > initiation_age) {
+          smoking_years <- cessation_age - initiation_age + 1 # Normal case
+          smoking_years_minusone <- cessation_age - initiation_age
+        }
+      }
+      
+      # Calculate Pack Years (smoking years * CPD/20)
+      pack_years_minusone <- smoking_years_minusone * cigs_per_day / 20
+    }
+
+    # Append the individual's data to aggr_out
+    aggr_out <- rbind(aggr_out, data.frame(
+      Sex = sex,
+      Race = race,
+      YOB = yob,
+      Age = age,
+      Initiation_Age = initiation_age,
+      Cessation_Age = cessation_age,
+      Quit_Age = quit_age,
+      Eversmoker = eversmoker,
+      Smokenow = smokenow,
+      CigsPerDay = cigs_per_day,
+      Pack_Years = pack_years,
+      Pack_Years_Minusone = pack_years_minusone,
+      Smoking_Years = smoking_years,
+      Smoking_Years_Minusone = smoking_years_minusone,
+      stringsAsFactors = FALSE
+    ))
+  }
+  return(aggr_out)
+}
+```
+
+
+#SHGdat2BY
+This function creates a birth year report from simulation results. It takes a dataframe containing simulation results (shgdata) and groups the data by YOB (Year of Birth). For each year of birth, it calculates the count of Females and Males and returns a summarized dataframe ordered by YOB.
+
+```{r}
+SHGdat2BY <- function(shgdata) {
+  # Check if required columns are present
+  required_columns <- c("YOB", "Sex")
+  missing_columns <- setdiff(required_columns, colnames(shgdata))
+  if (length(missing_columns) > 0) {
+    stop(paste("The following required columns are missing from 'shgdata':", paste(missing_columns, collapse = ", ")))
+  }
+  
+  # Check if YOB and Sex columns contain valid data types
+  if (!is.numeric(shgdata$YOB)) {
+    stop("Column 'YOB' must be numeric.")
+  }
+  if (!is.numeric(shgdata$Sex)) {
+    stop("Column 'Sex' must be numeric.")
+  }
+  
+  # Ensure no negative or nonsensical years in YOB
+  if (any(shgdata$YOB < 1800 | shgdata$YOB > 2100, na.rm = TRUE)) {
+    warning("Some 'YOB' values are outside a reasonable range (1800-2100). These will be included unless removed beforehand.")
+  }
+  
+  # Summarize data by YOB
+  SHGBY <- shgdata %>%
+    group_by(YOB) %>%
+    summarise(
+      Females = sum(Sex == 1, na.rm = TRUE),  # Count of females
+      Males = sum(Sex == 0, na.rm = TRUE)    # Count of males
+    ) %>%
+    arrange(YOB)  # Sort by YOB
+  
+  # Return the summarized dataframe
+  return(SHGBY)
+}
+```
+
+
+#sufftrgt
+This function scales the values in a birth year report (byrdata) to create a target dataset. It multiplies the counts of Females and Males in the input dataframe by a coverage factor (default is 10) and returns the scaled dataset.
+
+```{r}
+sufftrgt <- function(byrdata, coverage = 10) {
+  # Check for required columns
+  required_columns <- c("Females", "Males")
+  missing_columns <- setdiff(required_columns, colnames(byrdata))
+  if (length(missing_columns) > 0) {
+    stop(paste("The following required columns are missing from 'byrdata':", paste(missing_columns, collapse = ", ")))
+  }
+
+  # Scale Females and Males by the coverage factor
+  byrtrgt <- byrdata
+  byrtrgt$Females <- coverage * byrdata$Females
+  byrtrgt$Males <- coverage * byrdata$Males
+  
+  # Return the modified dataframe
+  return(byrtrgt)
+}
+```
+
+
+#suff_shortage
+This function calculates the shortage of individuals in a birth year dataset relative to a target dataset. It takes two dataframes: byrrslts (results) and byrtrgt (target). For each YOB-gender combination, if the results fall short of the target, it calculates the difference; otherwise, it assigns zero. The output matches the structure of the target dataset (byrtrgt).
+
+```{r}
+suff_shortage <- function(byrrslts, byrtrgt) {
+  # Check for required columns
+  required_columns <- c("YOB", "Females", "Males")
+  missing_byrrslts <- setdiff(required_columns, colnames(byrrslts))
+  missing_byrtrgt <- setdiff(required_columns, colnames(byrtrgt))
+  if (length(missing_byrrslts) > 0) {
+    stop(paste("The following required columns are missing from 'byrrslts':", paste(missing_byrrslts, collapse = ", ")))
+  }
+  if (length(missing_byrtrgt) > 0) {
+    stop(paste("The following required columns are missing from 'byrtrgt':", paste(missing_byrtrgt, collapse = ", ")))
+  }
+  
+  # Merge the two dataframes by YOB, keeping all rows from byrtrgt
+  combined <- merge(
+    byrtrgt, byrrslts, 
+    by = "YOB", 
+    all.x = TRUE,  # Keep all rows from byrtrgt
+    suffixes = c("_trgt", "_rslts")
+  )
+  
+  # Replace NA values in byrrslts columns with 0
+  combined$Females_rslts[is.na(combined$Females_rslts)] <- 0
+  combined$Males_rslts[is.na(combined$Males_rslts)] <- 0
+  
+  # Calculate shortage
+  combined$Females_shortage <- pmax(combined$Females_trgt - combined$Females_rslts, 0)
+  combined$Males_shortage <- pmax(combined$Males_trgt - combined$Males_rslts, 0)
+  
+  # Create the output dataframe with the same structure as byrtrgt
+  byrrem <- combined[, c("YOB", "Females_shortage", "Males_shortage")]
+  colnames(byrrem) <- c("YOB", "Females", "Males")
+  
+  return(byrrem)
+}
+```
+
+
+#SHGbyr
+This function runs simulations to meet population targets specified in a birth year dataset (BYr). For each YOB-gender combination, it prepares input files, runs simulations, processes outputs, and aggregates results into AggData. It uses looping to process all rows and genders in BYr and dynamically updates the aggregated results.
+
+```{r}
+SHGbyr <- function(BYr, prcssyr, seed, exclude_deceased = "On") {
+  # Input Validation ---------------------------------------------------------
+  if (!all(c("YOB") %in% colnames(BYr))) {
+    stop("The 'BYr' dataframe must include a 'YOB' column.")
+  }
+  if (ncol(BYr) < 3) {
+    stop("The 'BYr' dataframe must have at least three columns: 'YOB', 'Females', and 'Males'.")
+  }
+
+  # Initialize an empty dataframe for aggregated data
+  AggData <- SHG_rslts_ini()
+  
+  # Outer loop: Iterate over each row in the 'BYr' dataframe
+  for (i in 1:nrow(BYr)) {
+    # Extract the birth year for the current row
+    YBirth <- BYr[i, "YOB"]
+    
+    # Inner loop: Iterate over genders (j = 1 for males, j = 2 for females)
+    for (j in c(1, 2)) {
+      # Extract the population for the current year and gender
+      poprun <- BYr[i, j + 1]
+      
+      # Skip if the population is zero or NA
+      if (is.na(poprun) || poprun == 0) {
+        next
+      }
+      
+      # Map gender: j = 1 -> gender = 1 (female), j = 2 -> gender = 0 (male)
+      gender <- 2 - j
+      
+      # Set up the simulation input
+      SHG_Setup(Sex = gender, YOB = YBirth, Population = poprun, Seed = i * seed + j)
+      
+      # Run the simulation
+      SHG_Run()
+      
+      # Process the simulation output
+      SHGout <- SHG_Output()
+      
+      # Aggregate the simulation output
+      AggData <- SHG_Aggr(SHGout, AggData, prcssyr, exclude_deceased)  # Pass exclude_deceased
+    }
+  }
+  
+  # Return the aggregated data
+  return(AggData)
+}
+```
+
+
+#SHGbyr_extend
+This function extends the aggregated results (AggData) until population shortages specified in BYr are resolved. It calculates shortages using suff_shortage and runs additional simulations for any YOB-gender combination that falls short. The process continues until all shortages are eliminated, and the function returns the updated AggData.
+
+```{r}
+SHGbyr_extend <- function(AggData, BYr, prcssyr, seed, exclude_deceased = "On") {
+  # Input Validation ---------------------------------------------------------
+  if (!all(c("YOB", "Females", "Males") %in% colnames(BYr))) {
+    stop("The 'BYr' dataframe must include the columns: 'YOB', 'Females', and 'Males'.")
+  }
+  
+  # Processing Loop ----------------------------------------------------------
+  # Step 1: Initialize shortage calculation
+  repeat {
+    # Step 2: Get the current birth year report from AggData
+    Aggbyr <- SHGdat2BY(AggData)
+    
+    # Step 3: Calculate the shortage
+    newbyr <- suff_shortage(Aggbyr, BYr)
+    
+    # Check sufficiency criteria: All shortages must be zero
+    if (all(newbyr$Females == 0 & newbyr$Males == 0)) {
+      break  # Exit the loop when no shortages remain
+    }
+    
+    # Step 4: Iterate over each row in 'newbyr'
+    for (i in seq_len(nrow(newbyr))) {
+      # Extract the birth year for the current row
+      YBirth <- newbyr[i, "YOB"]
+      
+      # Inner loop: Iterate over genders (1 for females, 2 for males)
+      for (j in c(1, 2)) {
+        # Extract the population for the current year and gender
+        poprun <- newbyr[i, j + 1]  # Column 2 is Females, Column 3 is Males
+        
+        # Skip if the population is zero or NA
+        if (is.na(poprun) || poprun == 0) {
+          next
+        }
+        
+        # Map gender: 1 -> Female (1), 2 -> Male (0)
+        gender <- 2 - j
+        
+        # Set up the simulation input
+        SHG_Setup(Sex = gender, YOB = YBirth, Population = poprun, Seed = i * seed + j)
+        
+        # Run the simulation
+        SHG_Run()
+        
+        # Process the simulation output
+        SHGout <- SHG_Output()
+        
+        # Aggregate the simulation output, incorporating exclude_deceased
+        AggData <- SHG_Aggr(SHGout, AggData, prcssyr, exclude_deceased = exclude_deceased)
+      }
+    }
+    
+    # Increment the seed to ensure variability in simulations
+    seed <- seed + 1
+  }
+  
+  # Return the aggregated data ------------------------------------------------
+  return(AggData)
+}
+```
+
+
+#sample_SHG
+This function performs random sampling from simulation results (SHG_rslts) based on a target dataset (BYr). For each YOB-gender combination in BYr, it filters eligible candidates from SHG_rslts and selects a random sample matching the target size. The sampled entries are aggregated and returned as a new dataframe.
+
+```{r}
+sample_SHG <- function(SHG_rslts, BYr, seed) {
+  # Input Validation ---------------------------------------------------------
+  if (!is.data.frame(SHG_rslts)) {
+    stop("Input 'SHG_rslts' must be a dataframe.")
+  }
+  if (!all(c("YOB", "Females", "Males") %in% colnames(BYr))) {
+    stop("The 'BYr' dataframe must include columns: 'YOB', 'Females', and 'Males'.")
+  }
+  if (!is.numeric(seed) || length(seed) != 1) {
+    stop("Input 'seed' must be a single numeric value.")
+  }
+  
+  # Set the random seed for reproducibility
+  set.seed(seed)
+  
+  # Initialize an empty dataframe to store the output samples
+  sampled_data <- SHG_rslts[0, ]  # Empty dataframe with same structure as SHG_rslts
+  
+  # Sampling Loop ------------------------------------------------------------
+  for (i in 1:nrow(BYr)) {
+    # Extract the current YOB and sample populations
+    current_yob <- as.numeric(BYr[i, "YOB"])
+    female_pop <- as.numeric(BYr[i, "Females"])
+    male_pop <- as.numeric(BYr[i, "Males"])
+    
+    # Sample females
+    if (female_pop > 0) {
+      female_candidates <- SHG_rslts[which(SHG_rslts$YOB == current_yob & SHG_rslts$Sex == 1), ]
+      if (nrow(female_candidates) == 0) {
+        warning(paste("No female candidates for YOB =", current_yob))
+      } else {
+        female_pop <- min(female_pop, nrow(female_candidates))  # Adjust to available candidates
+        female_sample <- female_candidates[sample(seq_len(nrow(female_candidates)), size = female_pop), ]
+        sampled_data <- rbind(sampled_data, female_sample)
+      }
+    }
+    
+    # Sample males
+    if (male_pop > 0) {
+      male_candidates <- SHG_rslts[which(SHG_rslts$YOB == current_yob & SHG_rslts$Sex == 0), ]
+      if (nrow(male_candidates) == 0) {
+        warning(paste("No male candidates for YOB =", current_yob))
+      } else {
+        male_pop <- min(male_pop, nrow(male_candidates))  # Adjust to available candidates
+        male_sample <- male_candidates[sample(seq_len(nrow(male_candidates)), size = male_pop), ]
+        sampled_data <- rbind(sampled_data, male_sample)
+      }
+    }
+  }
+  
+  # Return the sampled data --------------------------------------------------
+  return(sampled_data)
+}
+```
+
+
+#smpl2age
+This function summarizes smoking-related metrics by Age and Sex for a given simulation sample or results dataframe. It calculates the percentage of Eversmoker and Smokenow individuals, as well as the average CigsPerDay, Pack_Years, and Smoking_Years for those who are Eversmoker == 1. The resulting dataframe provides an age-sex breakdown of smoking behaviors and history.
+
+```{r}
+smpl2age <- function(data) {
+  # Input Validation ---------------------------------------------------------
+  if (!is.data.frame(data)) {
+    stop("Input 'data' must be a dataframe.")
+  }
+  
+  required_columns <- c("Age", "Sex", "Eversmoker", "Smokenow", 
+                        "CigsPerDay", "Pack_Years", "Smoking_Years")
+  missing_columns <- setdiff(required_columns, colnames(data))
+  
+  if (length(missing_columns) > 0) {
+    stop(paste("Missing required columns:", paste(missing_columns, collapse = ", ")))
+  }
+  
+  # Create a summary dataframe -----------------------------------------------
+  summary_df <- data %>%
+    group_by(Age, Sex) %>% 
+    summarise(
+      Total = n(),
+      EverSmoker_Percentage = 100 * mean(Eversmoker == 1, na.rm = TRUE),
+      SmokeNow_Percentage = 100 * mean(Smokenow == 1, na.rm = TRUE),
+      CPD_Avg = mean(CigsPerDay[Eversmoker == 1], na.rm = TRUE),
+      CPD_Std = sd(CigsPerDay[Eversmoker == 1], na.rm = TRUE),
+      PY_Avg = mean(Pack_Years[Eversmoker == 1], na.rm = TRUE),
+      PY_Std = sd(Pack_Years[Eversmoker == 1], na.rm = TRUE),
+      SY_Avg = mean(Smoking_Years[Eversmoker == 1], na.rm = TRUE),
+      SY_Std = sd(Smoking_Years[Eversmoker == 1], na.rm = TRUE)
+    ) %>%
+    arrange(Age, Sex) %>%  # Sort by Age and Sex
+    ungroup()
+  
+  # Return the summary dataframe ---------------------------------------------
+  return(summary_df)
+}
+```
+
+
+#dat2age
+This function is designed for observed cohort data in this workflow. It transforms and prepares the data by:
+Renaming key columns for consistency (Enrollment_Age to Age, etc.).
+Recoding the Sex column (M → 0, F → 1).
+Replacing missing values (NA) in Eversmoker and Smokenow with 0.
+Calculating a new Smoking_Years column based on smoking history. Once the transformations are complete, the function calls smpl2age to generate a summarized dataframe showing smoking-related metrics by Age and Sex.
+
+```{r}
+dat2age <- function(data) {
+  # Input Validation ---------------------------------------------------------
+  if (!is.data.frame(data)) {
+    stop("Input 'data' must be a dataframe.")
+  }
+
+  required_columns <- c("Enrollment_Age", "Sex", "RaceAnalysis", 
+                        "EverSmoker", "SmokeNow", 
+                        "PackYears", "AgeQuitSmoking", "AgeStartSmoking")
+  missing_columns <- setdiff(required_columns, colnames(data))
+  
+  if (length(missing_columns) > 0) {
+    stop(paste("Missing required columns:", paste(missing_columns, collapse = ", ")))
+  }
+
+  # Step 1: Replace NA in Eversmoker and Smokenow ----------------------------
+  data <- data %>%
+    mutate(
+      EverSmoker = ifelse(is.na(EverSmoker), 0, EverSmoker),
+      SmokeNow = ifelse(is.na(SmokeNow), 0, SmokeNow)
+    )
+
+  # Step 2: Rename columns ---------------------------------------------------
+  data <- data %>%
+    rename(
+      Age = Enrollment_Age,
+      Race = RaceAnalysis,
+      Eversmoker = EverSmoker,
+      Smokenow = SmokeNow,
+      Pack_Years = PackYears
+    )
+  
+  # Step 3: Recode Sex column ------------------------------------------------
+  data <- data %>%
+    mutate(Sex = case_when(
+      Sex == "M" ~ 0,
+      Sex == "F" ~ 1,
+      TRUE ~ NA_real_
+    ))
+
+  # Step 4: Calculate Smoking_Years column -----------------------------------
+  data <- data %>%
+    mutate(Smoking_Years = case_when(
+      Eversmoker == 0 ~ 0,
+      Eversmoker == 1 & Smokenow == 0 ~ AgeQuitSmoking - AgeStartSmoking,
+      Eversmoker == 1 & Smokenow == 1 ~ Age - AgeStartSmoking,
+      TRUE ~ NA_real_
+    ))
+
+  # Step 5: Call smpl2age ----------------------------------------------------
+  summary_df <- smpl2age(data)
+
+  # Return the summary dataframe ---------------------------------------------
+  return(summary_df)
+}
+```
+
+
+#aggregate_density
+This function aggregates density estimates from multiple samples for a given variable, such as CigsPerDay, Pack_Years, or Smoking_Years. It calculates the mean density and confidence interval (CI) bounds for each bin (x value), summarizing distributional trends across samples. This approach avoids storing large raw datasets while retaining essential information about variability and central tendencies in the sampled distributions.
+
+```{r}
+aggregate_density <- function(dist_list, var_name, CI = 0.95) {
+  # Combine density data for all repetitions into a single dataframe
+  all_densities <- bind_rows(
+    lapply(dist_list, function(d) data.frame(x = d[[var_name]]$x, y = d[[var_name]]$y)),
+    .id = "Rep"
+  )
+  
+  # Aggregate densities by x-values
+  aggregated <- all_densities %>%
+    group_by(x) %>%
+    summarise(
+      Mean = mean(y),
+      Lower = quantile(y, probs = (1 - CI) / 2),
+      Upper = quantile(y, probs = 1 - (1 - CI) / 2),
+      .groups = "drop"  # Drop grouping to avoid warnings
+    )
+  
+  return(aggregated)
+}
+```
+
+
+#BYrf and BYrm
+The BYrf and BYrm functions transform a BYr dataframe into gender-specific subsets while preserving the original structure.
+  - BYrf: Retains the Females column and sets the Males column to 0, effectively creating a BYr structure representing only females.
+  - BYrm: Retains the Males column and sets the Females column to 0, effectively creating a BYr structure representing only males.
+Both functions ensure the YOB, Females, and Males columns are maintained for consistency.
+
+```{r}
+# Function to create a BYr structure with only females
+BYrf <- function(BYr) {
+  # Validate input
+  if (!all(c("YOB", "Females", "Males") %in% colnames(BYr))) {
+    stop("BYr must have columns: 'YOB', 'Females', and 'Males'.")
+  }
+  
+  # Create a new BYr structure with Females intact and Males set to 0
+  BYr_females <- BYr
+  BYr_females$Males <- 0  # Set Males to 0
+  return(BYr_females)
+}
+
+# Function to create a BYr structure with only males
+BYrm <- function(BYr) {
+  # Validate input
+  if (!all(c("YOB", "Females", "Males") %in% colnames(BYr))) {
+    stop("BYr must have columns: 'YOB', 'Females', and 'Males'.")
+  }
+  
+  # Create a new BYr structure with Males intact and Females set to 0
+  BYr_males <- BYr
+  BYr_males$Females <- 0  # Set Females to 0
+  return(BYr_males)
+}
+```
+
+
+#rep_smpl_dist
+This function performs repeated sampling from a dataset and tracks key variables (CigsPerDay, Pack_Years, Smoking_Years) and age-based smoking metrics (EverSmoker_Percentage, SmokeNow_Percentage). For each repetition, it calculates density distributions for ever-smokers and aggregates results into two dataframes: one with mean distributions and CI bounds, and another summarizing age-sex-specific smoking statistics with CI bounds. This function provides a robust framework for analyzing variability across samples.
+
+```{r}
+# Helper Function: Process Distributions for Eversmokers
+process_distributions <- function(smpl) {
+  smpl_ever <- smpl[smpl$Eversmoker == 1, ]
+  
+  list(
+    CigsPerDay = density(smpl_ever$CigsPerDay, from = 0, to = 100, n = 512),
+    Pack_Years = density(smpl_ever$Pack_Years, from = 0, to = 100, n = 512),
+    Pack_Years_Minusone = density(smpl_ever$Pack_Years_Minusone, from = 0, to = 100, n = 512),
+    Smoking_Years = density(smpl_ever$Smoking_Years, from = 0, to = 100, n = 512),
+    Smoking_Years_Minusone = density(smpl_ever$Smoking_Years_Minusone, from = 0, to = 100, n = 512)
+  )
+}
+
+# Main Function: rep_smpl_dist
+rep_smpl_dist <- function(data, BYr, rep, CI = 0.95) {
+  # Step 1: Initialize storage for distributions and age breakdown
+  dist_list <- list(full = list(), female = list(), male = list())
+  age_breakdown_list <- list()
+  
+  # Step 2: Main loop over repetitions
+  for (seed in 1:rep) {
+    # Sample once for the full population
+    smpl_full <- sample_SHG(data, BYr, seed)
+    
+    # Filter subsets for female and male populations
+    smpl_female <- smpl_full %>% filter(Sex == 1)
+    smpl_male <- smpl_full %>% filter(Sex == 0)
+    
+    # Collect distributions for all three subpopulations
+    dist_list$full[[seed]] <- process_distributions(smpl_full)
+    dist_list$female[[seed]] <- process_distributions(smpl_female)
+    dist_list$male[[seed]] <- process_distributions(smpl_male)
+    
+    # Age breakdown (only for full population)
+    age_breakdown_list[[seed]] <- smpl2age(smpl_full)
+  }
+  
+  # Step 3: Aggregate distributions across repetitions
+  dist_aggregated <- list(
+    full = list(
+      CigsPerDay = aggregate_density(dist_list$full, "CigsPerDay", CI),
+      Pack_Years = aggregate_density(dist_list$full, "Pack_Years", CI),
+      Pack_Years_Minusone = aggregate_density(dist_list$full, "Pack_Years_Minusone", CI),
+      Smoking_Years = aggregate_density(dist_list$full, "Smoking_Years", CI),
+      Smoking_Years_Minusone = aggregate_density(dist_list$full, "Smoking_Years_Minusone", CI)
+    ),
+    female = list(
+      CigsPerDay = aggregate_density(dist_list$female, "CigsPerDay", CI),
+      Pack_Years = aggregate_density(dist_list$female, "Pack_Years", CI),
+      Pack_Years_Minusone = aggregate_density(dist_list$female, "Pack_Years_Minusone", CI),
+      Smoking_Years = aggregate_density(dist_list$female, "Smoking_Years", CI),
+      Smoking_Years_Minusone = aggregate_density(dist_list$female, "Smoking_Years_Minusone", CI)
+    ),
+    male = list(
+      CigsPerDay = aggregate_density(dist_list$male, "CigsPerDay", CI),
+      Pack_Years = aggregate_density(dist_list$male, "Pack_Years", CI),
+      Pack_Years_Minusone = aggregate_density(dist_list$male, "Pack_Years_Minusone", CI),
+      Smoking_Years = aggregate_density(dist_list$male, "Smoking_Years", CI),
+      Smoking_Years_Minusone = aggregate_density(dist_list$male, "Smoking_Years_Minusone", CI)
+    )
+  )
+  
+  # Step 4: Aggregate age breakdowns
+  age_results <- bind_rows(age_breakdown_list, .id = "Rep") %>%
+    group_by(Age, Sex) %>%
+    summarise(
+      EverSmoker_Mean = mean(EverSmoker_Percentage),
+      EverSmoker_Lower = quantile(EverSmoker_Percentage, probs = (1 - CI) / 2),
+      EverSmoker_Upper = quantile(EverSmoker_Percentage, probs = 1 - (1 - CI) / 2),
+      SmokeNow_Mean = mean(SmokeNow_Percentage),
+      SmokeNow_Lower = quantile(SmokeNow_Percentage, probs = (1 - CI) / 2),
+      SmokeNow_Upper = quantile(SmokeNow_Percentage, probs = 1 - (1 - CI) / 2),
+      .groups = "drop"
+    )
+  
+  # Return aggregated results
+  return(list(Distributions = dist_aggregated, AgeBreakdown = age_results))
+}
+```
+
+
+#extr_prvlnc_smpld_rslts
+The extr_prvlnc_smpld_rslts function extracts and formats the age-based prevalence and smoking metrics from the output of the rep_smpl_dist function. It focuses on the AgeBreakdown component of the input, ensuring the necessary columns (e.g., EverSmoker_Mean, SmokeNow_Mean, and their confidence intervals) are present and correctly formatted. The function directly selects these columns, reorders them for clarity, and arranges the data by age and sex. The resulting dataframe includes columns for age, sex, and smoking-related metrics with their mean and confidence interval bounds, making it ready for further analysis or visualization.
+
+```{r}
+extr_prvlnc_smpld_rslts <- function(smpld_SHG_rslts, CI = 0.95) {
+  # Input Validation ---------------------------------------------------------
+  if (!is.list(smpld_SHG_rslts) || !"AgeBreakdown" %in% names(smpld_SHG_rslts)) {
+    stop("Input 'smpld_SHG_rslts' must be a list containing an 'AgeBreakdown' component.")
+  }
+
+  # Extract AgeBreakdown -----------------------------------------------------
+  age_breakdown <- smpld_SHG_rslts$AgeBreakdown
+
+  # Check for necessary columns ----------------------------------------------
+  required_cols <- c("Age", "Sex", "EverSmoker_Mean", "SmokeNow_Mean", 
+                     "EverSmoker_Lower", "EverSmoker_Upper", 
+                     "SmokeNow_Lower", "SmokeNow_Upper")
+  missing_cols <- setdiff(required_cols, colnames(age_breakdown))
+  if (length(missing_cols) > 0) {
+    stop(paste("Missing columns in 'AgeBreakdown':", paste(missing_cols, collapse = ", ")))
+  }
+
+  # Assign confidence interval columns directly ------------------------------
+  result <- age_breakdown %>%
+    select(
+      Age, Sex,
+      EverSmoker_Mean, 
+      EverSmoker_Lower, EverSmoker_Upper,
+      SmokeNow_Mean, 
+      SmokeNow_Lower, SmokeNow_Upper
+    ) %>%
+    arrange(Age, Sex)  # Optional: ensure ordering by Age and Sex
+
+  # Return the formatted dataframe -------------------------------------------
+  return(result)
+}
+```
+
+
+#extr_dist_smpld_rslts
+The extr_dist_smpld_rslts function focuses on extracting and consolidating the distributions of smoking-related variables (CigsPerDay, Pack_Years, and Smoking_Years) from the Distributions component of the rep_smpl_dist output. It ensures that the input structure includes required columns (x, Mean, Lower, Upper) for each variable. The function combines these distributions into a single dataframe and reshapes it into a wide format, where each variable’s distribution is represented with its mean and confidence interval bounds. This structured output enables easy comparisons of variable distributions and is ready for detailed statistical analysis or visualization.
+
+```{r}
+extr_dist_smpld_rslts <- function(smpld_SHG_rslts, population = "full", CI = 0.95) {
+  # Validate the population input
+  if (!population %in% c("full", "female", "male")) {
+    stop("Invalid population input. Choose from 'full', 'female', or 'male'.")
+  }
+  
+  # Access the specific subpopulation distributions
+  dist <- smpld_SHG_rslts$Distributions[[population]]
+  
+  # Combine distributions into a single dataframe in the desired format
+  aggregated_dist <- tibble(
+    x = dist$CigsPerDay$x,  # x-values are the same across all distributions
+    CigsPerDay_Mean = dist$CigsPerDay$Mean,
+    CigsPerDay_Lower = dist$CigsPerDay$Lower,
+    CigsPerDay_Upper = dist$CigsPerDay$Upper,
+    Pack_Years_Mean = dist$Pack_Years$Mean,
+    Pack_Years_Lower = dist$Pack_Years$Lower,
+    Pack_Years_Upper = dist$Pack_Years$Upper,
+    Pack_Years_M1_Mean = dist$Pack_Years_Minusone$Mean,
+    Pack_Years_M1_Lower = dist$Pack_Years_Minusone$Lower,
+    Pack_Years_M1_Upper = dist$Pack_Years_Minusone$Upper,
+    Smoking_Years_Mean = dist$Smoking_Years$Mean,
+    Smoking_Years_Lower = dist$Smoking_Years$Lower,
+    Smoking_Years_Upper = dist$Smoking_Years$Upper,
+    Smoking_Years_M1_Mean = dist$Smoking_Years_Minusone$Mean,
+    Smoking_Years_M1_Lower = dist$Smoking_Years_Minusone$Lower,
+    Smoking_Years_M1_Upper = dist$Smoking_Years_Minusone$Upper
+  )
+  
+  # Return the aggregated dataframe
+  return(aggregated_dist)
+}
+```
+
+
+#make_prvlnc_plot
+Creates a prevalence plot comparing SHG simulations and data by age, sex, and smoking status. Includes confidence intervals, customizable legends, and titles. Inputs: SHG and data prevalence, target ("EverSmoker" or "SmokeNow"), CI level, and display options for legends and subtitles. Outputs a ggplot2 object.
+
+```{r}
+# Helper function for prevalence plots
+make_prevalence_plot <- function(SHG_prvlnc, dat_prvlnc, target, CI = 95, legend = "On", subtitle = NULL) {
+  # Validate inputs
+  if (!target %in% c("EverSmoker", "SmokeNow")) {
+    stop("Invalid target. Choose either 'EverSmoker' or 'SmokeNow'.")
+  }
+  required_cols <- c("Age", "Sex", paste0(target, "_Mean"), paste0(target, "_Lower"), paste0(target, "_Upper"))
+  if (!all(required_cols %in% colnames(SHG_prvlnc))) {
+    stop(paste("SHG_prvlnc must contain the necessary columns for", target, "analysis."))
+  }
+  if (!all(c("Age", "Sex", paste0(target, "_Percentage")) %in% colnames(dat_prvlnc))) {
+    stop(paste("dat_prvlnc must contain the necessary columns for", target, "analysis."))
+  }
+
+  # Split data by gender
+  SHG_male <- SHG_prvlnc[SHG_prvlnc$Sex == 0, ]
+  SHG_female <- SHG_prvlnc[SHG_prvlnc$Sex == 1, ]
+  dat_male <- dat_prvlnc[dat_prvlnc$Sex == 0, ]
+  dat_female <- dat_prvlnc[dat_prvlnc$Sex == 1, ]
+
+  # Define labels for legend
+  CI_label_m <- paste0("Males (", CI, "% CI)")
+  CI_label_f <- paste0("Females (", CI, "% CI)")
+  y_label <- paste(target, "Percentage")
+
+  # Set up plot title
+  plottitle <- if (!is.null(subtitle)) subtitle else NULL
+
+  # Create the plot
+  plot <- ggplot() +
+    geom_ribbon(
+      data = SHG_male,
+      aes(x = Age, ymin = .data[[paste0(target, "_Lower")]], ymax = .data[[paste0(target, "_Upper")]], fill = CI_label_m),
+      alpha = 0.4
+    ) +
+    geom_ribbon(
+      data = SHG_female,
+      aes(x = Age, ymin = .data[[paste0(target, "_Lower")]], ymax = .data[[paste0(target, "_Upper")]], fill = CI_label_f),
+      alpha = 0.4
+    ) +
+    geom_line(
+      data = SHG_male,
+      aes(x = Age, y = .data[[paste0(target, "_Mean")]], color = "Males (SHG)"),
+      size = 1
+    ) +
+    geom_line(
+      data = SHG_female,
+      aes(x = Age, y = .data[[paste0(target, "_Mean")]], color = "Females (SHG)"),
+      size = 1
+    ) +
+    geom_point(
+      data = dat_male,
+      aes(x = Age, y = .data[[paste0(target, "_Percentage")]], color = "Males (Data)"),
+      size = 2
+    ) +
+    geom_point(
+      data = dat_female,
+      aes(x = Age, y = .data[[paste0(target, "_Percentage")]], color = "Females (Data)"),
+      size = 2
+    ) +
+    labs(
+      title = plottitle,
+      x = "Age",
+      y = y_label,
+      fill = "Legend",
+      color = "Legend"
+    ) +
+    scale_color_manual(
+      values = c(
+        "Females (Data)" = "darkred",
+        "Females (SHG)" = "red",
+        "Males (Data)" = "darkblue",
+        "Males (SHG)" = "blue"
+      ),
+      breaks = c("Females (Data)", "Females (SHG)", "Males (Data)", "Males (SHG)")  # Controls order in the legend
+    ) +
+    scale_fill_manual(
+      values = setNames(c("pink", "lightblue"), c(CI_label_f, CI_label_m)),  # Ensure mapping matches dynamic labels
+      breaks = c(CI_label_f, CI_label_m)  # Specify order in the legend
+    ) +
+    coord_cartesian(ylim = c(0, 100)) +
+    theme_minimal() +
+    theme(
+      legend.position = if (legend == "On") "bottom" else "none",
+      legend.box = "horizontal",
+      legend.title = element_blank(),
+      plot.title = element_text(hjust = 0.5, size = 13)
+    ) +
+    guides(
+      color = guide_legend(nrow = 2, byrow = TRUE),  # Two-row legend for lines
+      fill = guide_legend(nrow = 2, byrow = TRUE)    # Two-row legend for ribbons
+    )
+
+  return(plot)
+}
+```
+
+
+#prvlnc_plot
+Generates two side-by-side plots comparing SHG-simulated and observed smoking prevalence by age and sex for Ever Smokers and Current Smokers. Each plot shows confidence intervals, mean prevalence lines, and data points for males and females. Ensures consistent y-axis limits, distinct color coding, and a single shared legend. Validates input data for required columns to ensure reliable execution.
+
+```{r}
+prvlnc_plot <- function(SHG_sim_prvlnc, dat_prvlnc, 
+                        legend = "On", subtitle = NULL, population = NULL, CI = 95) {
+  # Validate inputs for required columns
+  required_cols <- c("Age", "Sex", "EverSmoker_Mean", "EverSmoker_Lower", "EverSmoker_Upper",
+                     "SmokeNow_Mean", "SmokeNow_Lower", "SmokeNow_Upper")
+  if (!all(required_cols %in% colnames(SHG_sim_prvlnc))) {
+    stop("SHG_sim_prvlnc must contain the necessary columns for prevalence analysis.")
+  }
+  if (!all(c("Age", "Sex", "EverSmoker_Percentage", "SmokeNow_Percentage") %in% colnames(dat_prvlnc))) {
+    stop("dat_prvlnc must contain the necessary columns for prevalence analysis.")
+  }
+  
+  # Set up subtitles for the individual plots
+  sub1 <- if (!is.null(subtitle)) paste0("Ever Smokers of ", population) else population
+  sub2 <- if (!is.null(subtitle)) paste0("Current Smokers of ", population) else population
+  
+  # Generate the Ever Smokers plot
+  plot_ever <- make_prevalence_plot(
+    SHG_prvlnc = SHG_sim_prvlnc,
+    dat_prvlnc = dat_prvlnc,
+    target = "EverSmoker",
+    CI = CI,
+    legend = legend,
+    subtitle = sub1
+  )
+
+  # Generate the Current Smokers plot
+  plot_now <- make_prevalence_plot(
+    SHG_prvlnc = SHG_sim_prvlnc,
+    dat_prvlnc = dat_prvlnc,
+    target = "SmokeNow",
+    CI = CI,
+    legend = "Off",  # Suppress individual legends for the second plot
+    subtitle = sub2
+  )
+
+  # Combine everything with one shared legend
+  final_plot <- (plot_ever | plot_now) +
+    plot_layout(guides = "collect") +  # Collect all legends into one
+    plot_annotation(
+      theme = theme(
+        legend.position = if (legend == "On") "bottom" else "none",
+        legend.box = "horizontal",
+        legend.title = element_blank()
+      )
+    )
+  
+  # Return the final combined plot
+  return(final_plot)
+}
+```
+
+
+#dist_plot
+This updated dist_plot() function overlays the SHG simulation distribution (blue line with a confidence ribbon) and the observed data distribution (orange line) for a specified variable (CigsPerDay, PackYears, or SmokingYears). Internally, it calls make_data_distribution() to produce either a piecewise-constant bar (for CigsPerDay or SmokingYears) or a kernel density (for PackYears) on the data side. The function then unifies both distributions in a single ggplot object, providing a clear visual comparison of simulation results versus real-world observations.
+
+
+```{r}
+dist_plot <- function(dist_smpled, data, target, 
+                      title = "Comparison of Distributions: SHG vs. Data",
+                      legend = "On",
+                      ytitle = "On",
+                      ymax = 0,
+                      CI = 95) {
+  # Validate input for target
+  if (!target %in% c("CigsPerDay", "SmokingYears", "PackYears")) {
+    stop("Invalid target. Choose from 'CigsPerDay', 'SmokingYears', or 'PackYears'.")
+  }
+  
+  # --- 1) Identify the SHG columns -----------------------------------------
+  var_prefix <- switch(target,
+    "CigsPerDay"    = "CigsPerDay",
+    "SmokingYears"  = "Smoking_Years",
+    "PackYears"     = "Pack_Years"
+  )
+  mean_col   <- paste0(var_prefix, "_Mean")
+  lower_col  <- paste0(var_prefix, "_Lower")
+  upper_col  <- paste0(var_prefix, "_Upper")
+  
+  # Extract SHG y-values
+  sampled_mean  <- dist_smpled[[mean_col]]
+  sampled_lower <- dist_smpled[[lower_col]]
+  sampled_upper <- dist_smpled[[upper_col]]
+  
+  # -------------------------------------------------------------------------
+  # --- 2) Build the "Data" distribution via the helper ---------------------
+  # Instead of embedding logic here, call make_data_distribution().
+  # This returns a df with columns: x, Data
+  data_df <- make_data_distribution(data, target)
+  
+  # -------------------------------------------------------------------------
+  # --- 3) Determine Y-axis limits (ymax) if not specified ------------------
+  if (ymax == 0) {
+    # Combine data side's "Data" with SHG's upper
+    possible_max <- c(data_df$Data, sampled_upper)
+    ymax <- max(possible_max, na.rm = TRUE)
+  }
+  
+  # Prepare CI label for the ribbon
+  CI_label <- paste0(CI, "% CI")
+  
+  # Combine into a single data frame for plotting
+  # We'll align x with dist_smpled$x (512 points),
+  # and we already have data_df for the data side
+  plot_data <- data.frame(
+    x         = dist_smpled$x,
+    SHG       = sampled_mean,
+    SHG_Lower = sampled_lower,
+    SHG_Upper = sampled_upper
+  )
+  
+  # --- 4) Build the ggplot ---
+  p <- ggplot() +
+    # SHG confidence ribbon
+    geom_ribbon(
+      data = plot_data,
+      aes(x = x, ymin = SHG_Lower, ymax = SHG_Upper, fill = CI_label),
+      alpha = 0.8
+    ) +
+    # SHG mean line
+    geom_line(
+      data = plot_data,
+      aes(x = x, y = SHG, color = "SHG"),
+      size = 1
+    ) +
+    # Data line (bar or density)
+    geom_line(
+      data = data_df,
+      aes(x = x, y = Data, color = "Data"),
+      size = 1
+    ) +
+    # Axis limits
+    coord_cartesian(xlim = c(0, 80), ylim = c(0, ymax)) +
+    # Labels
+    labs(
+      title = title,
+      x = target,
+      y = if (ytitle == "On") "Density" else NULL,
+      fill = "Legend",
+      color = "Legend"
+    ) +
+    # Fill/color scales
+    scale_fill_manual(
+      values = setNames("lightblue", CI_label),
+      breaks = c(CI_label),
+      guide = if (legend == "On") guide_legend(override.aes = list(alpha = 0.8)) else "none"
+    ) +
+    scale_color_manual(
+      values = c("Data" = "orange", "SHG" = "blue"),
+      breaks = c("Data", "SHG"),
+      guide = if (legend == "On") guide_legend(override.aes = list(size = 1)) else "none"
+    ) +
+    # Minimal theme
+    theme_minimal() +
+    theme(
+      legend.box.background = if (legend == "On") element_rect(color = "black", size = 0.5) else element_blank(),
+      legend.box.margin     = if (legend == "On") margin(5, 5, 5, 5) else margin(0, 0, 0, 0),
+      legend.key.size       = if (legend == "On") unit(1, "lines") else unit(0, "lines"),
+      legend.title          = element_blank()
+    )
+  
+  return(p)
+}
+```
+
+
+#make_data_distribution
+Generates a data-side distribution for plotting, using either a kernel density (for “PackYears”) or a piecewise-constant bar approach (for “CigsPerDay” or “SmokingYears”). The function returns a two-column data frame (x and Data) suitable for overlaying against the SHG distribution in downstream plotting functions.
+
+```{r}
+make_data_distribution <- function(data, target) {
+  # data: the original data frame (e.g., MECS_sh_cleaned)
+  # target: "CigsPerDay", "SmokingYears", or "PackYears"
+  # returns a data frame with columns x and Data
+
+  # Filter to valid values
+  data_vals <- data[[target]][ data$EverSmoker == 1 & !is.na(data[[target]]) ]
+
+  if (target == "PackYears") {
+    # Continuous approach: kernel density
+    dd <- density(data_vals, from = 0, to = 100, n = 512)
+    data_df <- data.frame(
+      x    = dd$x,
+      Data = dd$y
+    )
+  } else {
+    # Piecewise-constant bar approach
+    if (target == "CigsPerDay") {
+      bin_info <- data.frame(
+        code  = 1:5,
+        xmin  = c(0, 5.1, 10.1, 20.1, 30.1),
+        xmax  = c(5, 10, 20, 30, 100)
+      )
+    } else {
+      # SmokingYears
+      bin_info <- data.frame(
+        code  = 1:5,
+        xmin  = c(0, 10.1, 20.1, 30.1, 40.1),
+        xmax  = c(10, 20, 30, 40, 100)
+      )
+    }
+    
+    tab_code <- table(data_vals)
+    sum_codes <- sum(tab_code[names(tab_code) %in% as.character(1:5)])
+    
+    data_df_list <- list()
+    for (i in seq_len(nrow(bin_info))) {
+      code_i <- bin_info$code[i]
+      if (! code_i %in% names(tab_code)) next
+      p_i <- as.numeric(tab_code[as.character(code_i)]) / sum_codes
+      width_i <- bin_info$xmax[i] - bin_info$xmin[i]
+      height_i <- p_i / width_i
+      
+      df_i <- data.frame(
+        x = c(bin_info$xmin[i], bin_info$xmin[i], bin_info$xmax[i], bin_info$xmax[i], NA),
+        Data = c(0, height_i, height_i, 0, NA)
+      )
+      data_df_list[[i]] <- df_i
+    }
+    data_df <- do.call(rbind, data_df_list)
+  }
+
+  return(data_df)
+}
+```
+
+
+#stacked_dist_plots
+The stacked_dist_plots function generates and combines distribution comparison plots for CigsPerDay, PackYears, and SmokingYears. It calls the dist_plot function three times, once for each target, and stacks the resulting plots vertically using the patchwork package. The combined plot includes individual titles for each variable as well as an overarching title, providing a clear visualization of the SHG simulations compared to the observed data across key smoking-related variables.
+
+```{r}
+# Function to create and stack distribution plots
+stacked_dist_plots <- function(dist_smpled, data, 
+                               title = "SHG vs. Data: Distributions of Smoking Variables",
+                               legend = "On",
+                               subtitle = "On",
+                               ytitle = "On",
+                               ymax = c(0, 0, 0),
+                               CI = 95) {
+  # Determine subplot titles based on subtitle parameter
+  cigs_title <- if (subtitle == "On") "Cigarettes Per Day: SHG vs. Data" else NULL
+  packyears_title <- if (subtitle == "On") "Pack Years: SHG vs. Data" else NULL
+  smokingyears_title <- if (subtitle == "On") "Smoking Years: SHG vs. Data" else NULL
+
+  # Generate individual plots for each target
+  plot_cigs <- dist_plot(
+    dist_smpled = dist_smpled,
+    data = data,
+    target = "CigsPerDay",
+    title = cigs_title,
+    legend = "Off",
+    ytitle = ytitle,
+    ymax = ymax[1],
+    CI = CI
+  )
+  
+  plot_packyears <- dist_plot(
+    dist_smpled = dist_smpled,
+    data = data,
+    target = "PackYears",
+    title = packyears_title,
+    legend = "Off",
+    ytitle = ytitle,
+    ymax = ymax[2],
+    CI = CI
+  )
+  
+  plot_smokingyears <- dist_plot(
+    dist_smpled = dist_smpled,
+    data = data,
+    target = "SmokingYears",
+    title = smokingyears_title,
+    legend = legend,
+    ytitle = ytitle,
+    ymax = ymax[3],
+    CI = CI
+  )
+  
+  # Stack the plots using patchwork
+  combined_plot <- plot_cigs / plot_packyears / plot_smokingyears +
+    plot_layout(heights = c(1, 1, 1), guides = "collect") + # Equal heights for all plots
+    plot_annotation(title)
+  
+  # Adjust the legend position to the bottom
+  combined_plot <- combined_plot & 
+    theme(legend.position = "bottom")  # Place the legend explicitly at the bottom
+  
+  # Return the combined plot
+  return(combined_plot)
+}
+```
+
+
+#calculate_ymax
+This updated calculate_ymax() function determines a single maximum y-axis value for a given variable (CigsPerDay, SmokingYears, or PackYears) by combining peaks from both SHG simulation distributions (_Upper columns) and data distributions. For categorical variables (CigsPerDay or SmokingYears), it calls make_data_distribution() to generate a piecewise bar distribution from the data side and takes its highest bar. For PackYears (continuous), it computes a kernel density on the data side and finds the density’s maximum. The result is the largest y-value across both the data and SHG, ensuring a unified vertical scale in subsequent plots.
+
+```{r}
+calculate_ymax <- function(dist_smpled_1, dist_smpled_2, data_1, data_2, target) {
+  # 1) Identify the SHG "_Upper" column
+  var_prefix <- switch(target,
+    "CigsPerDay"   = "CigsPerDay",
+    "SmokingYears" = "Smoking_Years",
+    "PackYears"    = "Pack_Years",
+    stop("Invalid target. Choose from 'CigsPerDay', 'SmokingYears', or 'PackYears'.")
+  )
+  
+  target_upper <- paste0(var_prefix, "_Upper")
+  
+  # 2) Extract max SHG peaks from both distributions
+  max_shg_1 <- max(dist_smpled_1[[target_upper]], na.rm = TRUE)
+  max_shg_2 <- max(dist_smpled_2[[target_upper]], na.rm = TRUE)
+  
+  # 3) Determine data maxima
+  #    - For PackYears (continuous), do the old density approach
+  #    - For CigsPerDay/SmokingYears (categorical), 
+  if (target == "CigsPerDay" | target == "SmokingYears") {
+    flatdist1 <- make_data_distribution(data_1, target)
+    flatdist2 <- make_data_distribution(data_2, target)
+    
+    data_max_1 <- max(flatdist1$Data, na.rm = TRUE)
+    data_max_2 <- max(flatdist2$Data, na.rm = TRUE)
+  } else if (target == "PackYears"){
+    vals1 <- data_1[[target]][data_1$EverSmoker == 1 & !is.na(data_1[[target]])]
+    vals2 <- data_2[[target]][data_2$EverSmoker == 1 & !is.na(data_2[[target]])]
+    
+    d1 <- density(vals1, from = 0, to = 100, n = 512)
+    d2 <- density(vals2, from = 0, to = 100, n = 512)
+    data_max_1 <- max(d1$y, na.rm = TRUE)
+    data_max_2 <- max(d2$y, na.rm = TRUE)
+  }
+
+  # 4) Combine and find the overall max
+  max_vals <- c(max_shg_1, max_shg_2, data_max_1, data_max_2)
+  if (all(is.infinite(max_vals))) return(0)
+  return(max(max_vals, na.rm = TRUE))
+}
+```
+
+
+#stacked_side_plots
+This function generates side-by-side stacked plots comparing smoking variable distributions for two populations. Each column includes subplots for "CigsPerDay", "PackYears", and "SmokingYears", with simulation and data results combined.
+Inputs: Simulated distributions (dist_smpled_1, dist_smpled_2), Observed data (data_1, data_2), Optional column titles (column_titles) and overall title (maintitle).
+Output: A combined ggplot object showing side-by-side stacked plots.
+
+```{r}
+stacked_side_plots <- function(dist_smpled_1, dist_smpled_2, data_1, data_2, 
+                               maintitle = "Smoking History Distributions: Data vs. SHG", 
+                               column_titles = c("Population 1", "Population 2"),
+                               CI = 95) {
+  # Calculate ymax for each variable
+  ymax_cigs <- calculate_ymax(dist_smpled_1, dist_smpled_2, data_1, data_2, "CigsPerDay")
+  ymax_packyears <- calculate_ymax(dist_smpled_1, dist_smpled_2, data_1, data_2, "PackYears")
+  ymax_smokingyears <- calculate_ymax(dist_smpled_1, dist_smpled_2, data_1, data_2, "SmokingYears")
+  ymax <- c(ymax_cigs, ymax_packyears, ymax_smokingyears)
+  
+  # Generate stacked plots for the first population
+  plot_1 <- stacked_dist_plots(
+    dist_smpled = dist_smpled_1, 
+    data = data_1, 
+    title = NULL,
+    legend = "On", 
+    subtitle = "Off",
+    ymax = ymax,
+    CI = CI
+  )
+  
+  # Generate stacked plots for the second population
+  plot_2 <- stacked_dist_plots(
+    dist_smpled = dist_smpled_2, 
+    data = data_2, 
+    title = NULL,
+    legend = "On", 
+    subtitle = "Off",
+    ytitle = "Off",
+    ymax = ymax,
+    CI = CI
+  )
+  
+  # Create the column titles as text grobs
+  title_main <- ggplot() +
+    ggtitle(maintitle) +
+    theme_void() +
+    theme(plot.title = element_text(hjust = 0.5, size = 13, face = "bold"))
+  
+  
+  title_1 <- ggplot() +
+    ggtitle(column_titles[1]) +
+    theme_void() +
+    theme(plot.title = element_text(hjust = 0.5, size = 11))
+  
+  title_2 <- ggplot() +
+    ggtitle(column_titles[2]) +
+    theme_void() +
+    theme(plot.title = element_text(hjust = 0.5, size = 11))
+  
+  # Combine column titles and plots
+  combined_titles <- title_1 + title_2 + plot_layout(ncol = 2)
+  combined_plots <- plot_1 | plot_2
+  
+  # Combine everything with adjusted layout
+  final_plot <- (
+    title_main / combined_titles / combined_plots
+  ) +
+    plot_layout(heights = c(0, 0, 1), guides = "collect") +  # Adjust height for the titles
+    plot_annotation(
+      theme = theme(
+        legend.position = "bottom",
+        legend.box = "horizontal",
+        legend.title = element_blank()
+      )
+    )
+
+  # Return the final combined plot
+  return(final_plot)
+}
+```
+
+
+#flatten_variable
+Creates a piecewise‐constant “bar” distribution for a single variable (CigsPerDay or Smoking_Years) in a 512×N data frame. It calculates the area under each bin, converts that area to a uniform height, and replaces the original _Mean/_Lower/_Upper columns with stepwise values, forcing zero at bin boundaries for a bar‐chart look.
+
+```{r}
+flatten_variable <- function(df, var_prefix, bin_info) {
+  # var_prefix: e.g. "CigsPerDay" or "Smoking_Years"
+  # bin_info: data frame with (xmin, xmax) for each bin
+  #
+  # This function:
+  # 1) Computes bin areas by summing density * dx in each bin
+  # 2) Converts those areas into piecewise-constant heights
+  # 3) Replaces the original columns with the new stepwise values
+  # 4) Forces zero at bin boundaries for a bar chart aesthetic
+  
+  mean_col  <- paste0(var_prefix, "_Mean")
+  lower_col <- paste0(var_prefix, "_Lower")
+  upper_col <- paste0(var_prefix, "_Upper")
+  
+  # If columns don't exist, return df unmodified
+  needed_cols <- c(mean_col, lower_col, upper_col)
+  if (!all(needed_cols %in% names(df))) {
+    return(df)
+  }
+  
+  # 1) Prepare for bin area calculation
+  x <- df$x
+  n <- length(x)
+  var_mean  <- df[[mean_col]]
+  var_lower <- df[[lower_col]]
+  var_upper <- df[[upper_col]]
+  
+  # dx for each interval
+  dx <- numeric(n)
+  for (j in seq_len(n-1)) {
+    dx[j] <- x[j+1] - x[j]
+  }
+  dx[n] <- 0
+  
+  # Create storage for bin areas
+  bin_area_mean  <- numeric(nrow(bin_info))
+  bin_area_lower <- numeric(nrow(bin_info))
+  bin_area_upper <- numeric(nrow(bin_info))
+  
+  # 2) Accumulate area in each bin
+  for (j in seq_len(n-1)) {
+    xm <- x[j]
+    i_bin <- which(xm >= bin_info$xmin & xm < bin_info$xmax)
+    if (length(i_bin) == 1) {
+      bin_area_mean[i_bin]  <- bin_area_mean[i_bin]  + var_mean[j]  * dx[j]
+      bin_area_lower[i_bin] <- bin_area_lower[i_bin] + var_lower[j] * dx[j]
+      bin_area_upper[i_bin] <- bin_area_upper[i_bin] + var_upper[j] * dx[j]
+    }
+  }
+  
+  # 3) Compute bin heights = area / width
+  bin_width    <- bin_info$xmax - bin_info$xmin
+  height_mean  <- bin_area_mean  / bin_width
+  height_lower <- bin_area_lower / bin_width
+  height_upper <- bin_area_upper / bin_width
+  
+  # 4) Overwrite the original columns with stepwise values
+  # We'll define new vectors for the variable
+  new_mean  <- numeric(n)
+  new_lower <- numeric(n)
+  new_upper <- numeric(n)
+  
+  for (j in seq_len(n)) {
+    xm <- x[j]
+    
+    # Check if x[j] is a boundary
+    is_boundary <- any(abs(xm - bin_info$xmin) < 1e-9) | 
+                   any(abs(xm - bin_info$xmax) < 1e-9)
+    if (is_boundary) {
+      # Force zero at the boundary for a vertical drop
+      new_mean[j]  <- 0
+      new_lower[j] <- 0
+      new_upper[j] <- 0
+    } else {
+      i_bin <- which(xm > bin_info$xmin & xm < bin_info$xmax)
+      if (length(i_bin) == 1) {
+        new_mean[j]  <- height_mean[i_bin]
+        new_lower[j] <- height_lower[i_bin]
+        new_upper[j] <- height_upper[i_bin]
+      } else {
+        # outside or exactly on boundary
+        new_mean[j]  <- 0
+        new_lower[j] <- 0
+        new_upper[j] <- 0
+      }
+    }
+  }
+  
+  df[[mean_col]]  <- new_mean
+  df[[lower_col]] <- new_lower
+  df[[upper_col]] <- new_upper
+  
+  return(df)
+}
+```
+
+
+#flatten_distribution
+Applies flatten_variable() to a full distribution data frame (e.g., 512×10), transforming the CigsPerDay and Smoking_Years columns into bar‐style step functions. It leaves Pack_Years columns unchanged, returning a data frame of the same shape that can be plotted as piecewise bars for those two variables.
+
+```{r}
+flatten_distribution <- function(dist_df) {
+  # dist_df: 512 x 10 data frame with:
+  #   x
+  #   CigsPerDay_Mean/_Lower/_Upper
+  #   Pack_Years_Mean/_Lower/_Upper
+  #   Smoking_Years_Mean/_Lower/_Upper
+  
+  # We'll define bin_info for CigsPerDay & Smoking_Years
+  bin_info_cpd <- data.frame(
+    xmin = c(0,  5.1, 10.1, 20.1, 30.1),
+    xmax = c(5, 10,   20,   30,   100)
+  )
+  bin_info_sy <- data.frame(
+    xmin = c(0,  10.1, 20.1, 30.1, 40.1),
+    xmax = c(10, 20,   30,   40,   100)
+  )
+  
+  # 1) Flatten "CigsPerDay" columns
+  dist_df <- flatten_variable(dist_df, "CigsPerDay", bin_info_cpd)
+  
+  # 2) Flatten "Smoking_Years" columns
+  dist_df <- flatten_variable(dist_df, "Smoking_Years", bin_info_sy)
+  
+  # 3) Leave Pack_Years columns unchanged
+  return(dist_df)
+}
+```
+
+
+#dist_plot_2
+This function compares the observed MECS smoking-history distribution for one variable against the corresponding flattened SHG mean density and confidence interval. It returns a single ggplot object with the standardized styling used across the cohort files while preserving the MECS flattening workflow.
+
+```{r}
+dist_plot_2 <- function(dist_smpled, data, target, 
+                        title = "Comparison of Distributions: SHG vs. Data",
+                        legend = "On",
+                        ytitle = "On",
+                        ymax = 0,
+                        CI = 95) {
+  
+  if (!target %in% c("CigsPerDay", "PackYears", "SmokingYears")) {
+    stop("Invalid target. Choose from 'CigsPerDay', 'PackYears', or 'SmokingYears'.")
+  }
+
+  # Column mappings for SHG
+  target_cols <- switch(target,
+    CigsPerDay   = c("CigsPerDay_Mean", "CigsPerDay_Lower", "CigsPerDay_Upper"),
+    PackYears    = c("Pack_Years_Mean", "Pack_Years_Lower", "Pack_Years_Upper"),
+    SmokingYears = c("Smoking_Years_Mean", "Smoking_Years_Lower", "Smoking_Years_Upper")
+  )
+  
+  x_label <- switch(target,
+    CigsPerDay   = "Cigarettes Per Day",
+    PackYears    = "Pack-Years",
+    SmokingYears = "Smoking Duration (Years)"
+  )
+
+  # SHG distribution is already flattened to the MECS category structure upstream.
+  sampled_mean  <- dist_smpled[[target_cols[1]]]
+  sampled_lower <- dist_smpled[[target_cols[2]]]
+  sampled_upper <- dist_smpled[[target_cols[3]]]
+  x_vals <- dist_smpled$x
+
+  # Observed MECS distribution is flattened to the same x grid for direct comparison.
+  data_df <- make_data_distribution(data, target)
+  
+  if (ymax == 0) {
+    ymax <- max(c(data_df$Data, sampled_upper), na.rm = TRUE)
+  }
+
+  CI_label <- paste0(CI, "% CI")
+  
+  plot_data <- data.frame(
+    x         = x_vals,
+    SHG       = sampled_mean,
+    SHG_Lower = sampled_lower,
+    SHG_Upper = sampled_upper
+  )
+
+  p <- ggplot() +
+    geom_ribbon(
+      data = plot_data,
+      aes(x = x, ymin = SHG_Lower, ymax = SHG_Upper, fill = CI_label),
+      alpha = 0.8
+    ) +
+    geom_line(
+      data = plot_data,
+      aes(x = x, y = SHG, color = "SHG"),
+      linewidth = 1.3
+    ) +
+    geom_line(
+      data = data_df,
+      aes(x = x, y = Data, color = "MECS"),
+      linewidth = 1.3
+    ) +
+    scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(
+      expand = expansion(mult = c(0, 0.02)),
+      limits = c(0, ymax),
+      labels = scales::label_number(accuracy = 0.01)
+    ) +
+    coord_cartesian(xlim = c(0, 80), ylim = c(0, ymax)) +
+    labs(
+      title = title,
+      x = x_label,
+      y = if (ytitle == "On") "Density" else NULL,
+      fill = "Legend",
+      color = "Legend"
+    ) +
+    scale_color_manual(
+      values = c("MECS" = "orange", "SHG" = "blue"),
+      breaks = c("MECS", "SHG")
+    ) +
+    scale_fill_manual(
+      values = setNames("lightblue", CI_label),
+      breaks = c(CI_label)
+    ) +
+    guides(
+      color = if (legend == "On") guide_legend(order = 1) else "none",
+      fill  = if (legend == "On") guide_legend(order = 2) else "none"
+    ) +
+    theme_minimal(base_size = 16) +
+    theme(
+      plot.title      = element_text(size = 18, face = "bold", hjust = 0.5),
+      axis.title.x    = element_text(size = 16),
+      axis.title.y    = element_text(size = 16),
+      axis.text       = element_text(size = 14),
+      legend.text     = element_text(size = 14),
+      legend.title    = element_blank(),
+      legend.position = if (legend == "On") "bottom" else "none",
+      axis.line       = element_line(color = "black"),
+      panel.border    = element_blank(),
+      plot.margin     = margin(5, 5, 5, 5)
+    )
+
+  return(p)
+}
+```
+
+
+#stacked_dist_plots_2
+This function builds the three single-variable MECS-versus-SHG distribution comparisons from dist_plot_2 and returns them as a named list. It allows the caller to control subtitles, legend placement, shared y-axis scaling, and whether the x-axis is shown on each component plot.
+
+```{r}
+stacked_dist_plots_2 <- function(dist_smpled, data, 
+                                 subtitle = "On",
+                                 ytitle = "On",
+                                 ymax = c(0, 0, 0),
+                                 CI = 95,
+                                 legend_flags = c("Off", "Off", "Off"),
+                                 show_x_axis = c(TRUE, TRUE, TRUE)) {
+  # Helper to strip x-axis for stacked layout
+  strip_x <- function(p) {
+    p + theme(
+      axis.title.x = element_blank(),
+      axis.text.x  = element_blank(),
+      axis.ticks.x = element_blank()
+    ) + xlab(NULL)
+  }
+
+  titles <- if (subtitle == "On") {
+    c("Cigarettes Per Day: SHG vs. Data", "Pack Years: SHG vs. Data", "Smoking Years: SHG vs. Data")
+  } else {
+    rep(NULL, 3)
+  }
+
+  # Cigs plot
+  plot_cigs <- dist_plot_2(
+    dist_smpled = dist_smpled,
+    data        = data,
+    target      = "CigsPerDay",
+    title       = titles[1],
+    legend      = legend_flags[1],
+    ytitle      = ytitle,
+    ymax        = ymax[1],
+    CI          = CI
+  )
+  if (!show_x_axis[1]) plot_cigs <- strip_x(plot_cigs)
+
+  # PackYears plot
+  plot_packyears <- dist_plot_2(
+    dist_smpled = dist_smpled,
+    data        = data,
+    target      = "PackYears",
+    title       = titles[2],
+    legend      = legend_flags[2],
+    ytitle      = ytitle,
+    ymax        = ymax[2],
+    CI          = CI
+  )
+  if (!show_x_axis[2]) plot_packyears <- strip_x(plot_packyears)
+
+  # SmokingYears plot
+  plot_smokingyears <- dist_plot_2(
+    dist_smpled = dist_smpled,
+    data        = data,
+    target      = "SmokingYears",
+    title       = titles[3],
+    legend      = legend_flags[3],
+    ytitle      = ytitle,
+    ymax        = ymax[3],
+    CI          = CI
+  )
+  if (!show_x_axis[3]) plot_smokingyears <- strip_x(plot_smokingyears)
+
+  return(list(
+    cigs         = plot_cigs,
+    packyears    = plot_packyears,
+    smokingyears = plot_smokingyears
+  ))
+}
+```
+
+
+#stacked_plots
+This function arranges two groups of MECS-versus-SHG distribution plots into a single stacked figure with optional shared title and legend. It standardizes y-axis limits across the paired groups so differences between rows can be compared on the same scale.
+
+```{r}
+stacked_plots <- function(
+  dist_smpled_1, dist_smpled_2, data_1, data_2, 
+  maintitle = "Smoking History Distributions: SHG vs. Data", 
+  row_titles = c("Group 1", "Group 2"),
+  CI = 95,
+  include_title = TRUE,
+  include_legend = TRUE
+) {
+  # Calculate ymax
+  ymax <- c(
+    calculate_ymax(dist_smpled_1, dist_smpled_2, data_1, data_2, "CigsPerDay"),
+    calculate_ymax(dist_smpled_1, dist_smpled_2, data_1, data_2, "PackYears"),
+    calculate_ymax(dist_smpled_1, dist_smpled_2, data_1, data_2, "SmokingYears")
+  )
+
+  # Extract legend if needed
+  if (include_legend) {
+    legend_plot <- dist_plot_2(
+      dist_smpled = dist_smpled_1,
+      data = data_1,
+      target = "SmokingYears",
+      title = NULL,
+      legend = "On",
+      ytitle = "Off",
+      ymax = ymax[3],
+      CI = CI
+    ) + theme(
+      legend.text = element_text(size = 20),
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.background = element_blank(),
+      legend.box.background = element_blank(),
+      panel.background = element_blank(),
+      plot.background = element_blank()
+    )
+    legend_shared <- get_legend(legend_plot)
+  }
+
+  # Top row (no x-axis)
+  plots_pop1 <- stacked_dist_plots_2(
+    dist_smpled_1, data_1,
+    subtitle = "Off", ytitle = "Off", ymax = ymax, CI = CI,
+    legend_flags = c("Off", "Off", "Off"),
+    show_x_axis = c(FALSE, FALSE, FALSE)
+  )
+
+  # Bottom row (with x-axis)
+  plots_pop2 <- stacked_dist_plots_2(
+    dist_smpled_2, data_2,
+    subtitle = "Off", ytitle = "Off", ymax = ymax, CI = CI,
+    legend_flags = c("Off", "Off", "Off"),
+    show_x_axis = if (include_legend) c(TRUE, TRUE, TRUE) else c(FALSE, FALSE, FALSE)
+  )
+
+  # Rows of plots
+  row1 <- plot_grid(plots_pop1$cigs, plots_pop1$packyears, plots_pop1$smokingyears, ncol = 3)
+  row2 <- plot_grid(plots_pop2$cigs, plots_pop2$packyears, plots_pop2$smokingyears, ncol = 3)
+
+  # Row labels (rotated inward)
+  row_label_1 <- ggdraw() + draw_label(row_titles[1], angle = 270, vjust = 0.5, hjust = 0.5, size = 20)
+  row_label_2 <- ggdraw() + draw_label(row_titles[2], angle = 270, vjust = 0.5, hjust = 0.5, size = 20)
+
+  # Add row labels to right
+  row1_labeled <- plot_grid(row1, row_label_1, ncol = 2, rel_widths = c(1, 0.05), align = "v")
+  row2_labeled <- plot_grid(row2, row_label_2, ncol = 2, rel_widths = c(1, 0.05), align = "v")
+
+  # Stack rows
+  plot_body <- plot_grid(
+    row1_labeled,
+    row2_labeled,
+    ncol = 1,
+    rel_heights = if (include_legend) c(1, 1.3) else c(1, 1),
+    align = "v"
+  )
+  # Title and layout
+  title_main <- ggdraw() + draw_label(maintitle, fontface = "bold", size = 22, hjust = 0.5)
+
+  plot_list <- list()
+  if (include_title) plot_list <- c(plot_list, list(title_main))
+  plot_list <- c(plot_list, list(plot_body))
+  if (include_legend) plot_list <- c(plot_list, list(legend_shared))
+
+  rel_heights <- c()
+  if (include_title) rel_heights <- c(rel_heights, 0.06)
+  rel_heights <- c(rel_heights, 1)
+  if (include_legend) rel_heights <- c(rel_heights, 0.12)
+
+  final_plot <- plot_grid(plotlist = plot_list, ncol = 1, rel_heights = rel_heights)
+  return(final_plot)
+}
+```
+
+
+#count_eligible
+The count_eligible function calculates the number of individuals meeting smoking screening criteria based on age and smoking history. It filters the dataset to include those within a specified age range who meet or exceed a given threshold for a smoking measure (e.g., Pack Years or Smoking Years). It considers both current smokers and former smokers who quit within the last 15 years (YSQ ≤ 15), returning the total count of eligible individuals.
+
+```{r}
+# Helper function for eligibility criteria
+count_eligible <- function(df, measure, threshold, min_age, max_age = 80, 
+                           age_col, smoker_col) {
+  df %>%
+    filter(.data[[age_col]] >= min_age, .data[[age_col]] <= max_age, 
+           .data[[measure]] >= threshold, 
+           (.data[[smoker_col]] == 1 | (.data[[smoker_col]] == 0 & YSQ <= 15))) %>%
+    nrow()
+}
+``` 
+
+
+#screening_eligible
+The screening_eligible function calculates key smoking-related statistics for a given dataset, distinguishing between simulated SHG data and observed cohort data. It computes the total population, the number of ever-smokers, current smokers, and former smokers. Additionally, it determines the prevalence of individuals exceeding pack-year and smoking-year thresholds (PY≥20, PY≥30, SY≥20, SY≥30) and assesses eligibility for lung cancer screening based on 2021 and 2013 USPSTF guidelines, as well as alternative SY-based criteria. The function returns these values in a structured dataframe.
+
+```{r}
+screening_eligible <- function(df, dataset_type = "SHG") {
+  # Validate dataset_type
+  if (!dataset_type %in% c("SHG", "MECS")) {
+    stop("Invalid dataset_type. Use 'SHG' for simulated data or 'MECS' for real data.")
+  }
+
+  # Define column mappings for SHG vs MECS
+  if (dataset_type == "SHG") {
+    age_col       <- "Age"
+    smoker_col    <- "Smokenow"
+    ever_col      <- "Eversmoker"
+    cessation_col <- "Cessation_Age"
+    py_col        <- "Pack_Years"
+    sy_col        <- "Smoking_Years"
+  } else {  # dataset_type refers to observed cohort data
+    age_col <- "Enrollment_Age"
+    smoker_col <- "SmokeNow"
+    ever_col <- "EverSmoker"
+    cessation_col <- "AgeQuitSmoking"
+    py_col <- "PackYears"
+    sy_col <- "SmokingYears"
+  }
+
+  # If MECS, convert smkyrs + smkquit to numeric midpoints
+  if (dataset_type == "MECS") {
+    df <- df %>%
+      mutate(
+        # Convert smkyrs (codes 1..5) into numeric midpoints for SmokingYears
+        SmokingYears = case_when(
+          smkyrs == 1 ~ 10,  # ≤10 years
+          smkyrs == 2 ~ 15,  # 11-20 years => midpoint ~15
+          smkyrs == 3 ~ 25,  # 21-30 years => 25
+          smkyrs == 4 ~ 35,  # 31-40 => 35
+          smkyrs == 5 ~ 45,  # ≥41 => 45
+          TRUE ~ NA_real_
+        ),
+        # Convert smkquit (codes 1..7) into numeric midpoints for YSQ
+        # If smoker_col == 1 => current smoker => YSQ=0
+        YSQ = case_when(
+          .data[[smoker_col]] == 1 ~ 0,  
+          smkquit == 1 ~ 0.5,  # <1 year
+          smkquit == 2 ~ 1.5,  # 1-2 years
+          smkquit == 3 ~ 4,    # 3-5 years
+          smkquit == 4 ~ 8,    # 6-10 years
+          smkquit == 5 ~ 13,   # 11-15 years
+          smkquit == 6 ~ 18,   # 16-20 years
+          smkquit == 7 ~ 25,   # 21+ years
+          TRUE ~ NA_real_
+        )
+      )
+  } else {
+    # If SHG or an observed cohort dataset, compute YSQ from Age - Cessation_Age
+    df <- df %>%
+      mutate(YSQ = case_when(
+        .data[[smoker_col]] == 1 ~ 0,  # Current smokers => YSQ=0
+        .data[[smoker_col]] == 0 & .data[[cessation_col]] > 0 ~ .data[[age_col]] - .data[[cessation_col]],
+        .data[[smoker_col]] == 0 & .data[[cessation_col]] <= 0 ~ NA_real_
+      ))
+  }
+
+  # Count populations
+  total_population <- nrow(df)
+  ever_smokers <- df %>% filter(.data[[ever_col]] == 1)
+  count_eversmokers <- nrow(ever_smokers)
+  count_currentsmokers <- 
+    nrow(ever_smokers %>% filter(.data[[smoker_col]] == 1))
+  count_formersmokers <- 
+    count_eversmokers - count_currentsmokers  # EverSmoker = Current + Former
+
+  # Compute prevalence of PY≥20, PY≥30, SY≥20, SY≥30
+  prevalence_counts <- c(
+    PY20 = nrow(ever_smokers %>% filter(.data[[py_col]] >= 20)),
+    PY30 = nrow(ever_smokers %>% filter(.data[[py_col]] >= 30)),
+    SY20 = nrow(ever_smokers %>% filter(.data[[sy_col]] >= 20)),
+    SY30 = nrow(ever_smokers %>% filter(.data[[sy_col]] >= 30))
+  )
+
+  # Compute eligibility counts using the external helper function
+  eligibility_counts <- c(
+    Eligible_2021 = count_eligible(df = ever_smokers, 
+                                   measure = py_col, 
+                                   threshold = 20, 
+                                   min_age = 50,
+                                   max_age = 80,
+                                   age_col = age_col,
+                                   smoker_col = smoker_col),
+    Eligible_2013 = count_eligible(df = ever_smokers, 
+                                   measure = py_col, 
+                                   threshold = 30, 
+                                   min_age = 55,
+                                   max_age = 80,
+                                   age_col = age_col,
+                                   smoker_col = smoker_col),
+    Eligible_SY20 = count_eligible(df = ever_smokers, 
+                                   measure = sy_col, 
+                                   threshold = 20, 
+                                   min_age = 50,
+                                   max_age = 80,
+                                   age_col = age_col,
+                                   smoker_col = smoker_col),
+    Eligible_SY30 = count_eligible(df = ever_smokers, 
+                                   measure = sy_col, 
+                                   threshold = 30, 
+                                   min_age = 50,
+                                   max_age = 80,
+                                   age_col = age_col,
+                                   smoker_col = smoker_col)
+  )
+
+  # Return structured dataframe
+  data.frame(
+    Dataset         = dataset_type,
+    Total_Population= total_population,
+    EverSmokers     = count_eversmokers,
+    CurrentSmokers  = count_currentsmokers,
+    FormerSmokers   = count_formersmokers,
+    PY20            = prevalence_counts["PY20"],
+    PY30            = prevalence_counts["PY30"],
+    SY20            = prevalence_counts["SY20"],
+    SY30            = prevalence_counts["SY30"],
+    Eligible_2021   = eligibility_counts["Eligible_2021"],
+    Eligible_2013   = eligibility_counts["Eligible_2013"],
+    Eligible_SY20   = eligibility_counts["Eligible_SY20"],
+    Eligible_SY30   = eligibility_counts["Eligible_SY30"]
+  )
+}
+```
+
+
+#aggregate_screening
+The aggregate_screening function processes repeated screening eligibility assessments across multiple samples and summarizes key statistics. It calculates the mean, lower, and upper confidence bounds for total population, ever-smokers, current smokers, former smokers, and individuals exceeding specific pack-year (PY) and smoking-year (SY) thresholds. Additionally, it aggregates eligibility estimates based on 2021 and 2013 USPSTF criteria, as well as SY-based alternatives. The function returns a structured dataframe with the population name as the first column.
+
+```{r}
+aggregate_screening <- function(screening_data, subpop_name, CI = 0.95) {
+  df <- bind_rows(screening_data)
+  
+  df_summary <- df %>%
+    summarise(
+      Total_Population = mean(Total_Population),
+      
+      EverSmokers_Mean = mean(EverSmokers),
+      EverSmokers_Lower = quantile(EverSmokers, probs = (1 - CI) / 2),
+      EverSmokers_Upper = quantile(EverSmokers, probs = 1 - (1 - CI) / 2),
+      
+      CurrentSmokers_Mean = mean(CurrentSmokers),
+      CurrentSmokers_Lower = quantile(CurrentSmokers, probs = (1 - CI) / 2),
+      CurrentSmokers_Upper = quantile(CurrentSmokers, probs = 1 - (1 - CI) / 2),
+      
+      FormerSmokers_Mean = mean(FormerSmokers),
+      FormerSmokers_Lower = quantile(FormerSmokers, probs = (1 - CI) / 2),
+      FormerSmokers_Upper = quantile(FormerSmokers, probs = 1 - (1 - CI) / 2),
+      
+      PY20_Mean = mean(PY20),
+      PY20_Lower = quantile(PY20, probs = (1 - CI) / 2),
+      PY20_Upper = quantile(PY20, probs = 1 - (1 - CI) / 2),
+
+      PY30_Mean = mean(PY30),
+      PY30_Lower = quantile(PY30, probs = (1 - CI) / 2),
+      PY30_Upper = quantile(PY30, probs = 1 - (1 - CI) / 2),
+
+      SY20_Mean = mean(SY20),
+      SY20_Lower = quantile(SY20, probs = (1 - CI) / 2),
+      SY20_Upper = quantile(SY20, probs = 1 - (1 - CI) / 2),
+
+      SY30_Mean = mean(SY30),
+      SY30_Lower = quantile(SY30, probs = (1 - CI) / 2),
+      SY30_Upper = quantile(SY30, probs = 1 - (1 - CI) / 2),
+
+      Eligible_2021_Mean = mean(Eligible_2021),
+      Eligible_2021_Lower = quantile(Eligible_2021, probs = (1 - CI) / 2),
+      Eligible_2021_Upper = quantile(Eligible_2021, probs = 1 - (1 - CI) / 2),
+
+      Eligible_2013_Mean = mean(Eligible_2013),
+      Eligible_2013_Lower = quantile(Eligible_2013, probs = (1 - CI) / 2),
+      Eligible_2013_Upper = quantile(Eligible_2013, probs = 1 - (1 - CI) / 2),
+
+      Eligible_SY20_Mean = mean(Eligible_SY20),
+      Eligible_SY20_Lower = quantile(Eligible_SY20, probs = (1 - CI) / 2),
+      Eligible_SY20_Upper = quantile(Eligible_SY20, probs = 1 - (1 - CI) / 2),
+
+      Eligible_SY30_Mean = mean(Eligible_SY30),
+      Eligible_SY30_Lower = quantile(Eligible_SY30, probs = (1 - CI) / 2),
+      Eligible_SY30_Upper = quantile(Eligible_SY30, probs = 1 - (1 - CI) / 2)
+    ) %>%
+    mutate(Population = subpop_name) %>%
+    select(Population, everything())  # Ensure Population is first column
+
+  return(df_summary)
+}
+```
+
+
+#rep_smpl_screening
+The rep_smpl_screening function performs repeated sampling from a simulated population and evaluates screening eligibility across different subpopulations. It draws multiple random samples (full population) and extracts male and female subsets within each iteration. Screening eligibility metrics are calculated separately for each group and stored. After all repetitions, the results are aggregated using aggregate_screening, summarizing mean estimates and confidence intervals for key measures. The function returns a structured dataframe with screening eligibility statistics for the full, male, and female populations.
+
+```{r}
+rep_smpl_screening <- function(data, BYr, rep, CI = 0.95) {
+  # Step 1: Initialize storage for results (empty lists for each subpopulation)
+  screening_full <- list()
+  screening_female <- list()
+  screening_male <- list()
+  
+  # Step 2: Loop over repetitions
+  for (seed in 1:rep) {
+    # Sample once for the full population
+    smpl_full <- sample_SHG(data, BYr, seed)
+    
+    # Filter for male and female subpopulations (Sex: 1 = Female, 0 = Male)
+    smpl_female <- smpl_full %>% filter(Sex == 1)
+    smpl_male <- smpl_full %>% filter(Sex == 0)
+    
+    # Compute screening eligibility for each sample
+    screening_full[[seed]] <- screening_eligible(smpl_full, dataset_type = "SHG")
+    screening_female[[seed]] <- screening_eligible(smpl_female, dataset_type = "SHG")
+    screening_male[[seed]] <- screening_eligible(smpl_male, dataset_type = "SHG")
+  }
+  
+  # Step 3: Convert list of results into a single dataframe
+  final_table <- bind_rows(
+    aggregate_screening(screening_full, "Full Population", CI),
+    aggregate_screening(screening_female, "Female Population", CI),
+    aggregate_screening(screening_male, "Male Population", CI)
+  )
+  
+  return(final_table)  # **Returns a single dataframe**
+}
+```
+
+
+#format_shg
+This function takes a vector of three SHG-derived percentage values (mean, lower bound, upper bound) and formats them as "mean (lower, upper)". This ensures a clear and standardized representation of SHG confidence intervals in tables.
+
+```{r}
+# Helper function to format SHG percentages
+format_shg <- function(values, decimals = 1) {
+  paste0(
+    round(values[1], decimals), " (", 
+    round(values[2], decimals), ", ", 
+    round(values[3], decimals), ")"
+  )
+}
+```
+
+
+#compare_Data_SHG
+Creates a comparative table of smoking-related measures for multiple subpopulations, combining real data (eligibility counts) with SHG simulation results. The function iterates through each subpopulation (e.g., Full, White, Black), optionally converting counts to percentages (based on total population or ever-smokers), and then populates a wide table of measures such as PY20, SY30, and eligibility criteria. Users can also remove specific rows (like “Total_Population” or “EverSmokers”) from the final table. This makes it easy to compare data and SHG outputs side by side in a single summary.
+
+```{r}
+compare_Data_SHG <- function(
+  elig_Data_full, elig_Data_wh, elig_Data_bl,
+  SHG_elig_full,  SHG_elig_wh,  SHG_elig_bl,
+  total      = "Off",
+  percentage = "Off",
+  ever       = "Off",
+  comparison = "All",
+  diff       = "Off"
+) {
+  # 1. Subpop definitions
+  comparison_map <- list(
+    All   = c("Full","Female","Male","Black","Black Female","Black Male",
+              "White","White Female","White Male"),
+    FM    = c("Female","Male"),
+    AFM   = c("Full","Female","Male"),
+    WhFM  = c("White","White Female","White Male"),
+    BlFM  = c("Black","Black Female","Black Male"),
+    BlWh  = c("Black","White"),
+    ABlWh = c("Full","Black","White"),
+    MBW   = c("Male","Black Male","White Male"),
+    FBW   = c("Female","Black Female","White Female")
+  )
+  selected_subpops <- comparison_map[[comparison]]
+  
+  # 2. Population‐to‐label maps
+  subpop_map_data <- c(
+    Full = "Full", Female = "Female", Male = "Male",
+    Black = "Black", `Black Female` = "Black Female", `Black Male` = "Black Male",
+    White = "White", `White Female` = "White Female", `White Male` = "White Male"
+  )
+  subpop_map_shg <- c(
+    Full = "Full Population", Female = "Female Population", Male = "Male Population",
+    Black = "Full Population", `Black Female` = "Female Population",
+    `Black Male` = "Male Population",
+    White = "Full Population", `White Female` = "Female Population",
+    `White Male` = "Male Population"
+  )
+  
+  # 3. Input lists
+  data_df_list <- list(
+    Full = elig_Data_full, Female = elig_Data_full, Male = elig_Data_full,
+    Black = elig_Data_bl, `Black Female` = elig_Data_bl, `Black Male` = elig_Data_bl,
+    White = elig_Data_wh, `White Female` = elig_Data_wh, `White Male` = elig_Data_wh
+  )
+  SHG_df_list <- list(
+    Full = SHG_elig_full, Female = SHG_elig_full, Male = SHG_elig_full,
+    Black = SHG_elig_bl, `Black Female` = SHG_elig_bl, `Black Male` = SHG_elig_bl,
+    White = SHG_elig_wh, `White Female` = SHG_elig_wh, `White Male` = SHG_elig_wh
+  )
+  
+  # 4. Measures + table skeleton
+  measures <- c(
+    "Total_Population","EverSmokers","CurrentSmokers","FormerSmokers",
+    "PY20","PY30","SY20","SY30",
+    "Eligible_2021","Eligible_2013","Eligible_SY20","Eligible_SY30"
+  )
+  table_cols <- unlist(lapply(selected_subpops, function(x) {
+    c(paste0(x, "_Data"), paste0(x, "_SHG"))
+  }))
+  comparison_table <- setNames(
+    as.data.frame(matrix(NA, length(measures), length(table_cols))),
+    table_cols
+  )
+  rownames(comparison_table) <- measures
+  
+  # 5. Which measures use ever-smoker base?
+  percent_by_ever_only <- c(
+    "PY20","PY30","SY20","SY30",
+    "Eligible_2021","Eligible_2013","Eligible_SY20","Eligible_SY30"
+  )
+  
+  # 6. Fill in each subpop × measure
+  for (subpop in selected_subpops) {
+    data_row    <- data_df_list[[subpop]][
+      data_df_list[[subpop]]$Population == subpop_map_data[subpop], ]
+    SHG_row     <- SHG_df_list[[subpop]][
+      SHG_df_list[[subpop]]$Population == subpop_map_shg[subpop], ]
+    total_pop   <- data_row$Total_Population
+    ever_smokers<- data_row$EverSmokers
+    ever_prop   <- ever_smokers / 100
+    total_prop  <- total_pop    / 100
+    
+    for (measure in measures) {
+      # ————————————————
+      # (A) SPECIAL-CASE Total_Population
+      # ————————————————
+      if (measure == "Total_Population") {
+        Data_value  <- total_pop
+        SHG_values  <- SHG_row[["Total_Population"]]
+        data_dcmls  <- 0
+        SHG_dcmls   <- 1   # or 0 if you prefer integer
+      } else {
+        # ————————————————
+        # (B) Denominators & decimals for other measures
+        # ————————————————
+        if (percentage == "On"
+            && ever == "On"
+            && measure %in% percent_by_ever_only) {
+          data_denum <- ever_prop
+          SHG_denum  <- SHG_row$EverSmokers_Mean / 100
+          data_dcmls <- 2; SHG_dcmls <- 2
+        } else if (percentage == "On") {
+          data_denum <- total_prop
+          SHG_denum  <- total_prop
+          data_dcmls <- 2; SHG_dcmls <- 2
+        } else {
+          data_denum <- 1
+          SHG_denum  <- 1
+          data_dcmls <- 0
+          SHG_dcmls  <- 1
+        }
+        
+        # Compute raw & SHG values
+        Data_value <- round(data_row[[measure]] / data_denum, data_dcmls)
+        mean_col   <- paste0(measure, "_Mean")
+        lower_col  <- paste0(measure, "_Lower")
+        upper_col  <- paste0(measure, "_Upper")
+        vals       <- c(
+          SHG_row[[mean_col]] / SHG_denum,
+          SHG_row[[lower_col]] / SHG_denum,
+          SHG_row[[upper_col]] / SHG_denum
+        )
+        if (diff == "On") vals <- vals - Data_value
+        SHG_values <- format_shg(vals, decimals = SHG_dcmls)
+      }
+      
+      # ————————————————
+      # (C) Store into result
+      # ————————————————
+      comparison_table[measure, paste0(subpop, "_Data")] <- Data_value
+      comparison_table[measure, paste0(subpop, "_SHG")]  <- SHG_values
+    }
+  }
+  
+  # 7. Optionally drop rows
+  rows_to_remove <- character()
+  if (total == "Off") rows_to_remove <- "Total_Population"
+  # if (ever == "On") rows_to_remove <- c(rows_to_remove, "EverSmokers")
+  if (length(rows_to_remove))
+    comparison_table <- comparison_table[
+      !rownames(comparison_table) %in% rows_to_remove, ]
+  
+  return(comparison_table)
+}
+```
+
+
+#style_compare_table
+This function takes a comparison data frame (with measures as rows and paired Data/SHG columns for various subpopulations) and formats it using kableExtra. It dynamically creates multi-level headers, colorizes the SHG values based on their differences relative to the Data values, and adds visual borders to delineate each subpopulation’s columns. Optionally, it can export the final table as an HTML file.
+
+```{r}
+style_compare_table <- function(df, diff = "Off", dataname = "Data", save_as_html = NULL) {
+  # Reset rownames as a column
+  styled_df <- df %>% tibble::rownames_to_column("Measure")
+  col_names <- colnames(styled_df)[-1]
+
+  # Identify subpopulations dynamically
+  subpops <- unique(gsub("_(Data|SHG)$", "", col_names))
+
+  # Create second header row using `dataname`
+  header_2 <- rep(c(dataname, "SHG"), length(subpops))
+
+  # First header: Pop names spanning 2 cols each
+  header_1 <- setNames(rep(2, length(subpops)), subpops)
+
+  # Colorize SHG entries
+  for (col in col_names) {
+    if (grepl("_SHG$", col)) {
+      for (i in seq_len(nrow(styled_df))) {
+        shg_val <- styled_df[[col]][i]
+        data_colname <- gsub("_SHG$", "_Data", col)
+        if (!data_colname %in% colnames(styled_df)) next
+        data_val <- styled_df[[data_colname]][i]
+
+        if (grepl("\\(", shg_val)) {
+          parts <- str_match(shg_val, "([-+]?\\d*\\.?\\d+).*?\\(([-+]?\\d*\\.?\\d+), ([-+]?\\d*\\.?\\d+)\\)")
+          mean <- as.numeric(parts[2])
+          lower <- as.numeric(parts[3])
+          upper <- as.numeric(parts[4])
+
+          color <- if (diff == "On") {
+            if (lower <= 0 && upper >= 0) "green"
+            else if (upper < 0) "orange"
+            else "blue"
+          } else {
+            if (lower <= data_val && upper >= data_val) "green"
+            else if (upper < data_val) "orange"
+            else "blue"
+          }
+
+          styled_df[[col]][i] <- paste0("<span style='color:", color, "'>", shg_val, "</span>")
+        }
+      }
+    }
+  }
+
+  # Create the base table
+  tbl <- kbl(
+    styled_df,
+    escape = FALSE,
+    align = "c",
+    col.names = c("Measure", header_2),
+    booktabs = TRUE
+  ) %>%
+    add_header_above(c(" " = 1, header_1), bold = TRUE) %>%
+    row_spec(0, bold = TRUE) %>%
+    column_spec(1, bold = TRUE) %>%
+    kable_styling(full_width = FALSE, bootstrap_options = c("condensed", "hover", "striped"))
+
+  # Add vertical lines around each (Data, SHG) block
+  for (i in seq_along(subpops)) {
+    data_col <- 2 * (i - 1) + 2  # offset + "Measure"
+    shg_col  <- data_col + 1
+    tbl <- tbl %>%
+      column_spec(data_col, border_left = TRUE) %>%
+      column_spec(shg_col, border_right = TRUE)
+  }
+
+  # Optional export
+  if (!is.null(save_as_html)) {
+    save_kable(tbl, file = save_as_html)
+  }
+
+  return(tbl)
+}
+```
+
+
+#style_compare_heatmap
+Builds a custom HTML-based comparison table using raw HTML tags instead of kableExtra. Applies consistent styling and heatmap logic to highlight the closeness of SHG estimates to observed values. Suitable for more flexible rendering or embedding in HTML documents. Also supports optional export to a standalone HTML file.
+
+```{r}
+style_compare_heatmap <- function(
+  df,
+  difference     = "Off",
+  rel_diff       = FALSE,
+  save_as_html   = NULL,
+  include_legend = TRUE,
+  bins           = 20
+) {
+  # 1. Prepare dataframe and detect subpopulations
+  styled_df <- df %>% tibble::rownames_to_column("Measure")
+  col_names <- colnames(styled_df)[-1]
+  subpops   <- unique(gsub("_(Data|SHG)$", "", col_names))
+  
+  # 2. Build the header row
+  header_html <- paste0(
+    "<tr>",
+      "<th style='text-align:left;width:100px;border:1px solid #ccc;'>SHG vs MECS</th>",
+      paste0(
+        "<th style='width:80px;border:1px solid #ccc;'>",
+        subpops,
+        "</th>",
+        collapse = ""
+      ),
+    "</tr>"
+  )
+  
+  # 3. Generate 'bins' shades of orange (light→dark) and 'bins' shades of blue (light→dark)
+  orange_colors <- grDevices::colorRampPalette(c("#FFF8F0", "#E67300"))(bins)
+  blue_colors   <- grDevices::colorRampPalette(c("#CCE5FF", "#004080"))(bins)
+  
+  # 4. Build each heatmap row
+  row_html_list     <- list()
+  insert_spacer_after <- c("FormerSmokers", "SY30")
+  
+  for (i in seq_len(nrow(styled_df))) {
+    row_vals <- list()
+    row_vals[[1]] <- sprintf(
+      "<td style='font-weight:bold;text-align:left;width:100px;height:36px;border:1px solid #ccc;'>%s</td>",
+      styled_df$Measure[i]
+    )
+    
+    for (subpop in subpops) {
+      data_val <- as.numeric(styled_df[[paste0(subpop, "_Data")]][i])
+      shg_val  <- styled_df[[paste0(subpop, "_SHG")]][i]
+      
+      if (grepl("\\(", shg_val)) {
+        parts        <- str_match(
+          shg_val,
+          "([-+]?\\d*\\.?\\d+).*?\\(([-+]?\\d*\\.?\\d+), ([-+]?\\d*\\.?\\d+)\\)"
+        )
+        mean_val     <- as.numeric(parts[2])
+        lower        <- as.numeric(parts[3])
+        upper        <- as.numeric(parts[4])
+        sd_halfwidth <- (upper - lower) / 2
+        
+        # Compute direction & display_val
+        if (difference == "On" && rel_diff) {
+          rel_val     <- mean_val / data_val
+          direction   <- mean_val
+          distance    <- abs(mean_val)
+          display_val <- sprintf("%+.1f%%", 100 * rel_val)
+          
+        } else if (difference == "Off" && rel_diff) {
+          rel_val     <- (mean_val - data_val) / data_val
+          direction   <- mean_val - data_val
+          distance    <- abs(direction)
+          display_val <- sprintf("%+.1f%%", 100 * rel_val)
+          
+        } else if (difference == "On") {
+          direction   <- mean_val
+          distance    <- abs(mean_val)
+          display_val <- sprintf("%.2f", mean_val)
+          
+        } else {
+          direction   <- mean_val - data_val
+          distance    <- abs(direction)
+          display_val <- sprintf("%.2f", data_val)
+        }
+        
+        # Determine bin_idx: 0 if z ≤ 1; bin_idx = floor(z) for 1 < z < bins; bin_idx = bins if z ≥ bins
+        z <- distance / sd_halfwidth
+        if (z <= 1) {
+          bin_idx <- 0
+        } else if (z >= bins) {
+          bin_idx <- bins
+        } else {
+          bin_idx <- floor(z)
+        }
+        
+        # Pick fill_color & font_color
+        if (bin_idx == 0) {
+          fill_color <- "white"
+          font_color <- "green"
+          
+        } else if (direction > 0) {
+          # SHG > data → positive side uses blue_colors[bin_idx]
+          fill_color <- blue_colors[bin_idx]
+          if (bin_idx <= 2) {
+            font_color <- "#000000"
+          } else if (bin_idx >= bins - 1) {
+            font_color <- "#FFFFFF"
+          } else if (bin_idx <= floor(bins / 2)) {
+            font_color <- "#222222"
+          } else {
+            font_color <- "#EEEEEE"
+          }
+        
+        } else {
+          # SHG < data → negative side uses orange_colors[bin_idx]
+          fill_color <- orange_colors[bin_idx]
+          if (bin_idx <= 2) {
+            font_color <- "#000000"
+          } else if (bin_idx >= bins - 1) {
+            font_color <- "#FFFFFF"
+          } else if (bin_idx <= floor(bins / 2)) {
+            font_color <- "#222222"
+          } else {
+            font_color <- "#EEEEEE"
+          }
+        }
+        
+        cell_html <- sprintf(
+          "<td style='background-color:%s;color:%s;text-align:center;font-weight:bold;width:80px;height:36px;border:1px solid #ccc;'>%s</td>",
+          fill_color, font_color, display_val
+        )
+        
+      } else {
+        cell_html <- sprintf(
+          "<td style='text-align:center;width:80px;height:36px;border:1px solid #ccc;'>%.2f</td>",
+          data_val
+        )
+      }
+      
+      row_vals[[length(row_vals) + 1]] <- cell_html
+    }
+    
+    row_html_list[[length(row_html_list) + 1]] <- 
+      paste0("<tr>", paste(row_vals, collapse = ""), "</tr>")
+    
+    if (styled_df$Measure[i] %in% insert_spacer_after) {
+      n_cols     <- length(subpops) + 1
+      spacer_row <- paste0(
+        "<tr>",
+          paste(
+            rep(
+              "<td style='height:12px;border:none;background-color:transparent;'></td>",
+              n_cols
+            ),
+            collapse = ""
+          ),
+        "</tr>"
+      )
+      row_html_list[[length(row_html_list) + 1]] <- spacer_row
+    }
+  }
+  
+  # 5. Build legend HTML if requested
+  legend_html <- ""
+  if (include_legend) {
+    total_cells   <- 2 * bins + 1
+    legend_colors <- c(
+      rev(orange_colors),  # darkest→lightest so pale sits next to white
+      "white",
+      blue_colors         # lightest→darkest
+    )
+    
+    # Initialize labels
+    legend_labels <- rep("", total_cells)
+    left_far    <- 1
+    right_far   <- total_cells
+    mid_index   <- bins + 1
+    
+    # Compute quarter markers
+    q1 <- floor(bins / 4)
+    q2 <- floor(bins / 2)
+    q3 <- floor(3 * bins / 4)
+    
+    # Positions on orange side
+    pos_o1 <- mid_index - q3
+    pos_o2 <- mid_index - q2
+    pos_o3 <- mid_index - q1
+    
+    # Positions on blue side
+    pos_b1 <- mid_index + q1
+    pos_b2 <- mid_index + q2
+    pos_b3 <- mid_index + q3
+    
+    legend_labels[left_far]   <- "SHG < Data"
+    legend_labels[pos_o1]     <- paste0(q3, " CI")
+    legend_labels[pos_o2]     <- paste0(q2, " CI")
+    legend_labels[pos_o3]     <- paste0(q1, " CI")
+    legend_labels[mid_index]  <- "Agreement"
+    legend_labels[pos_b1]     <- paste0(q1, " CI")
+    legend_labels[pos_b2]     <- paste0(q2, " CI")
+    legend_labels[pos_b3]     <- paste0(q3, " CI")
+    legend_labels[right_far]  <- "SHG > Data"
+    
+    n_cols    <- length(subpops) + 1
+    width_pct <- sprintf("%.2f%%", 100 / total_cells)
+    
+    # Build legend text cells; force nowrap on labeled positions
+    text_cells <- sapply(seq_len(total_cells), function(i) {
+      lbl <- legend_labels[i]
+      if (i %in% c(left_far, pos_o1, pos_o2, pos_o3, mid_index, pos_b1, pos_b2, pos_b3, right_far)) {
+        sprintf(
+          "<td style='width:%s;text-align:center;font-size:8px;padding-top:2px;white-space:nowrap;'>%s</td>",
+          width_pct, lbl
+        )
+      } else {
+        sprintf(
+          "<td style='width:%s;text-align:center;font-size:8px;padding-top:2px;'>%s</td>",
+          width_pct, lbl
+        )
+      }
+    })
+    
+    legend_html <- paste0(
+      "<tr><td colspan='", n_cols,
+         "' style='padding-top:15px;padding-bottom:4px;border-top:2px solid #ccc;'>",
+        "<table style='width:100%;border-collapse:collapse;'>",
+          "<tr>",
+            paste0(
+              "<td style='width:", width_pct,
+              ";height:10px;border:1px solid #ccc;background-color:",
+              legend_colors, ";'></td>",
+              collapse = ""
+            ),
+          "</tr>",
+          "<tr>",
+            paste0(text_cells, collapse = ""),
+          "</tr>",
+        "</table>",
+      "</td></tr>"
+    )
+  }
+  
+  # 6. Assemble full table HTML
+  full_table <- paste0(
+    "<table style='border-collapse:collapse;font-family:sans-serif;'>",
+      header_html,
+      paste0(row_html_list, collapse = "\n"),
+      legend_html,
+    "</table>"
+  )
+  
+  if (!is.null(save_as_html)) writeLines(full_table, con = save_as_html)
+  htmltools::HTML(full_table)
+}
+```
+
+
+#plot_deviation_forest
+This function generates a 33‑row forest plot of percent error for simulation outputs relative to observed data across All Races, Black, and White subpopulations, split by Overall, Female, and Male categories. You can optionally specify a symmetric x‑axis limit and confidence‑interval level for the legend.
+
+```{r}
+plot_deviation_forest <- function(df,
+                                  title = NULL,
+                                  xlim = 2.5,
+                                  ci_level = 99,
+                                  cohort_label = "MECS") {
+  name_map <- c(
+    EverSmokers    = "Ever Smoked",
+    CurrentSmokers = "Currently Smoke",
+    FormerSmokers  = "Formerly Smoked",
+    PY20           = "≥20 Pack Years",
+    PY30           = "≥30 Pack Years",
+    Eligible_2021  = "2021 USPSTF",
+    Eligible_2013  = "2013 USPSTF",
+    SY20           = "≥20-Yr Duration",
+    SY30           = "≥30-Yr Duration",
+    Eligible_SY20  = "USPSTF 20-Yr Duration",
+    Eligible_SY30  = "USPSTF 30-Yr Duration"
+  )
+
+  race_colors <- c(
+    "All Races" = "#c6dbef",
+    "Black"     = "#4292c6",
+    "White"     = "#084594"
+  )
+
+  ci_label <- paste0(ci_level, "% CI")
+
+  df2 <- df %>% tibble::rownames_to_column("Measure")
+
+  df_data <- df2 %>%
+    pivot_longer(
+      ends_with("_Data"),
+      names_to = c("Subgroup", "Type"),
+      names_pattern = "^(.*)_(Data)$",
+      values_to = "Observed"
+    ) %>%
+    select(Measure, Subgroup, Observed)
+
+  df_shg <- df2 %>%
+    pivot_longer(
+      ends_with("_SHG"),
+      names_to = c("Subgroup", "Type"),
+      names_pattern = "^(.*)_(SHG)$",
+      values_to = "SHG_str"
+    ) %>%
+    select(Measure, Subgroup, SHG_str)
+
+  df_long <- inner_join(df_data, df_shg, by = c("Measure", "Subgroup")) %>%
+    mutate(
+      SHG_mean = as.numeric(str_extract(SHG_str, "^[0-9.]+")),
+      CI_low   = as.numeric(str_extract(SHG_str, "(?<=\\()[0-9.]+(?=, )")),
+      CI_high  = as.numeric(str_extract(SHG_str, "(?<=, )[0-9.]+(?=\\))"))
+    )
+
+  df_plot <- df_long %>%
+    mutate(
+      D         = (SHG_mean - Observed) / Observed,
+      D_low     = (CI_low   - Observed) / Observed,
+      D_high    = (CI_high  - Observed) / Observed,
+      Gender    = case_when(
+        Subgroup %in% c("Full", "Black", "White") ~ "Overall",
+        grepl("Female", Subgroup) ~ "Female",
+        grepl("Male", Subgroup)   ~ "Male",
+        TRUE ~ NA_character_
+      ),
+      Race = case_when(
+        Subgroup %in% c("Full", "Female", "Male") ~ "All Races",
+        grepl("Black", Subgroup) ~ "Black",
+        grepl("White", Subgroup) ~ "White",
+        TRUE ~ NA_character_
+      ),
+      BaseMeasure = str_remove(Measure, " Female$| Male$"),
+      LabelBase = name_map[BaseMeasure],
+      Category = paste0(LabelBase, if_else(Gender == "Overall", "", paste0(" ", Gender)))
+    ) %>%
+    filter(!is.na(Race) & !is.na(Gender))
+
+  base_groups <- names(name_map)
+  group_labels <- name_map[base_groups]
+
+  category_order <- character(0)
+  for (i in seq_along(group_labels)) {
+    category_order <- c(
+      category_order,
+      paste0(group_labels[i]),
+      paste0(group_labels[i], " Female"),
+      paste0(group_labels[i], " Male")
+    )
+    if (i == 3) category_order <- c(category_order, "__spacer1__")
+    if (i == 7) category_order <- c(category_order, "__spacer2__")
+  }
+
+  spacer_rows <- tibble(
+    Measure = NA, Subgroup = NA, Observed = NA, SHG_mean = NA,
+    CI_low = NA, CI_high = NA, D = NA, D_low = NA, D_high = NA,
+    Gender = NA, Race = "All Races", BaseMeasure = NA,
+    LabelBase = NA,
+    Category = category_order[grepl("__spacer[0-9]+__", category_order)]
+  )
+
+  df_plot$Category <- as.character(df_plot$Category)
+  df_plot <- bind_rows(df_plot, spacer_rows)
+  df_plot$Category <- factor(df_plot$Category, levels = rev(category_order))
+
+  y_labels <- levels(df_plot$Category)
+  y_labels[y_labels %in% c("__top_spacer__", "__spacer1__", "__spacer2__")] <- ""
+
+  p <- ggplot(df_plot, aes(y = Category)) +
+    geom_errorbarh(
+      aes(xmin = D_low, xmax = D_high, color = Race, linetype = ci_label),
+      height = 0.2, size = 0.8, na.rm = TRUE
+    ) +
+    geom_point(
+      aes(x = D, color = Race, shape = Race),
+      size = 3, na.rm = TRUE
+    ) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "orange", size = 1.2) +
+    annotate(
+      "text",
+      x = xlim * 0.98,
+      y = tail(levels(df_plot$Category), 1),
+      label = cohort_label,
+      hjust = 1,
+      vjust = 1.1,
+      size = 3.8,
+      fontface = "bold",
+      color = "orange"
+    ) +
+    coord_cartesian(clip = "on") +
+    scale_x_continuous(
+      limits = c(-xlim, xlim),
+      breaks = seq(-xlim, xlim, by = 1),
+      labels = scales::percent_format(accuracy = 1),
+      expand = c(0, 0)
+    ) +
+    scale_color_manual(
+      name = "Subpopulation",
+      values = race_colors,
+      guide = guide_legend(order = 1)
+    ) +
+    scale_shape_manual(
+      name = "Subpopulation",
+      values = c("All Races" = 16, "Black" = 17, "White" = 15),
+      guide = guide_legend(order = 1)
+    ) +
+    scale_linetype_manual(
+      name = NULL,
+      values = setNames("solid", ci_label),
+      labels = ci_label,
+      guide = guide_legend(order = 2)
+    ) +
+    scale_y_discrete(labels = y_labels, expand = expansion(mult = c(0.02, 0.02))) +
+    labs(
+      title = title,
+      x = "Percent Error ((Simulated-Observed)/Observed)",
+      y = NULL
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.y     = element_text(size = 8),
+      legend.position = "bottom",
+      legend.box      = "horizontal"
+    )
+
+  annotation_plot <- ggplot() +
+    annotate(
+      "segment", x = 0.2, xend = 2.5, y = 0, yend = 0,
+      arrow = arrow(type = "closed", length = unit(0.15, "inches")),
+      size = 0.6, color = "black"
+    ) +
+    annotate(
+      "segment", x = -0.2, xend = -2.5, y = 0, yend = 0,
+      arrow = arrow(type = "closed", length = unit(0.15, "inches")),
+      size = 0.6, color = "black"
+    ) +
+    annotate(
+      "text", x = 1.5, y = 0.025,
+      label = "Overestimation", hjust = 0.5, vjust = 0, size = 3.5
+    ) +
+    annotate(
+      "text", x = -1.5, y = 0.025,
+      label = "Underestimation", hjust = 0.5, vjust = 0, size = 3.5
+    ) +
+    xlim(-2.5, 2.5) +
+    ylim(-0.025, 0.1) +
+    theme_void()
+
+  return(annotation_plot / p + plot_layout(heights = c(0.1, 1)))
+}
+```
+
+
+#compare_scatter_MECS_SHG
+This function generates a scatter plot comparing smoking intensity (cigarettes per day) and smoking duration (years) between the MECS dataset and a sampled subset of the SHG dataset, incorporating jitter to improve visualization of overlapping points. It aligns the MECS dataset’s sex encoding with SHG, extracts the birth year-gender distribution, and samples a single SHG dataset accordingly. The filtered ever-smoker data points are plotted with MECS represented by orange circles and SHG by blue circles. Users can adjust axis labels, the plot title, legend visibility, and the sampling coverage factor for SHG.
+
+numcigs: 0: Never Smoker; 1: 5 Cigarettes or Less; 2: 6-10 Cigarettes; 3: 11-20 Cigarettes; 4: 21-30 Cigarettes; 5: 31 Cigarettes or More
+smkyrs: 0: Never Smoker; 1: 10 Years or Less; 2: 11-20 Years; 3: 21-30 Years; 4: 31-40 Years; 5: 41 Years or More
+
+```{r}
+compare_scatter_MECS_SHG <- function(
+  mecs_df, shg_df,
+  plot_title      = "Smoking Intensity vs. Duration",
+  x_title         = "Cigarettes Per Day",
+  y_title         = "Smoking Duration (Years)",
+  legend_on       = TRUE,
+  coverage        = 1,
+  seed            = 42,
+  shg_categorical = FALSE,
+  threshold       = "None",
+  arrowlabel      = FALSE,
+  Ever            = TRUE
+) {
+  # Convert MECS sex encoding to match SHG helper functions.
+  mecs_df <- mecs_df %>%
+    mutate(Sex = ifelse(Sex == "M", 0, 1))
+
+  # Restrict observed MECS data to ever-smokers and map category codes to bin midpoints.
+  mecs_filtered <- mecs_df %>%
+    filter(EverSmoker == 1) %>%
+    mutate(
+      CigsPerDay_num = case_when(
+        CigsPerDay == 1 ~  3,
+        CigsPerDay == 2 ~  8,
+        CigsPerDay == 3 ~ 15,
+        CigsPerDay == 4 ~ 25,
+        CigsPerDay == 5 ~ 35,
+        TRUE            ~ NA_real_
+      ),
+      SmokingYears_num = case_when(
+        SmokingYears == 1 ~  5,
+        SmokingYears == 2 ~ 15,
+        SmokingYears == 3 ~ 25,
+        SmokingYears == 4 ~ 35,
+        SmokingYears == 5 ~ 45,
+        TRUE              ~ NA_real_
+      )
+    )
+
+  if (!shg_categorical) {
+    # Continuous SHG view uses a subgroup-matched sample.
+    byr_trgt     <- sufftrgt(SHGdat2BY(mecs_df), coverage = coverage)
+    sampled_SHG  <- sample_SHG(shg_df, byr_trgt, seed)
+    shg_filtered <- sampled_SHG %>% filter(Eversmoker == 1)
+
+    p <- ggplot() +
+      geom_jitter(
+        data = shg_filtered,
+        aes(x = CigsPerDay, y = Smoking_Years, color = "SHG"),
+        alpha = 0.05, size = 1, width = 0.5, height = 0.5
+      ) +
+      geom_count(
+        data = mecs_filtered,
+        aes(x = CigsPerDay_num, y = SmokingYears_num, color = "MECS"),
+        alpha = 0.6
+      ) +
+      scale_size_area(max_size = 12, guide = FALSE)
+
+    xrange <- c(0, 80)
+    yrange <- c(0, 70)
+
+  } else {
+    # Bubble view compares MECS category bins against SHG values binned to the same structure.
+    shg_binned <- shg_df %>%
+      filter(Eversmoker == 1) %>%
+      mutate(
+        CigsPerDay_cat = case_when(
+          CigsPerDay <= 5  ~  3,
+          CigsPerDay <= 10 ~  8,
+          CigsPerDay <= 20 ~ 15,
+          CigsPerDay <= 30 ~ 25,
+          CigsPerDay >  30 ~ 35,
+          TRUE             ~ NA_real_
+        ),
+        SmokingYears_cat = case_when(
+          Smoking_Years <= 10 ~  5,
+          Smoking_Years <= 20 ~ 15,
+          Smoking_Years <= 30 ~ 25,
+          Smoking_Years <= 40 ~ 35,
+          Smoking_Years >  40 ~ 45,
+          TRUE                ~ NA_real_
+        )
+      ) %>%
+      count(CigsPerDay_cat, SmokingYears_cat, name = "SHG_count") %>%
+      mutate(SHG_count = SHG_count / 10, color = "SHG")
+
+    mecs_binned <- mecs_filtered %>%
+      count(CigsPerDay_num, SmokingYears_num, name = "MECS_count") %>%
+      mutate(color = "MECS")
+
+    # Normalize bubble sizes to proportions when comparing ever-smoker distributions.
+    if (Ever) {
+      shg_binned <- shg_binned %>%
+        mutate(SHG_count = SHG_count / sum(SHG_count))
+
+      mecs_binned <- mecs_binned %>%
+        mutate(MECS_count = MECS_count / sum(MECS_count))
+    }
+
+    p <- ggplot() +
+      geom_point(
+        data = shg_binned,
+        aes(
+          x = CigsPerDay_cat, y = SmokingYears_cat,
+          size = SHG_count, color = color
+        ),
+        alpha = 0.6
+      ) +
+      geom_point(
+        data = mecs_binned,
+        aes(
+          x = CigsPerDay_num, y = SmokingYears_num,
+          size = MECS_count, color = color
+        ),
+        alpha = 0.6
+      ) +
+      scale_size_area(max_size = 15, guide = FALSE)
+
+    xrange <- c(0, 40)
+    yrange <- c(0, 50)
+  }
+
+  if (threshold %in% c("PY", "Both")) {
+    p <- p +
+      stat_function(
+        aes(color = "20-Pack-Year Threshold"),
+        fun = function(x) 400 / x,
+        size = 1.2,
+        xlim = xrange,
+        linetype = "dashed"
+      )
+
+    x_right_end <- max(xrange)
+    y_right_end <- 400 / x_right_end
+    x_top_end   <- 400 / max(yrange)
+    y_top_end   <- max(yrange)
+    dx <- (xrange[2] - xrange[1]) * 0.02
+    dy <- (yrange[2] - yrange[1]) * 0.02
+
+    p <- p +
+      annotate(
+        "segment",
+        x = x_right_end, xend = x_right_end,
+        y = y_right_end + dy, yend = y_right_end + 5 * dy,
+        arrow = grid::arrow(length = unit(0.025, "npc"), type = "closed"),
+        color = "darkred", size = 1
+      )
+
+    if (arrowlabel) {
+      p <- p +
+        annotate(
+          "text",
+          x = x_right_end,
+          y = y_right_end + 10 * dy + 5.5 * dy,
+          label = "\u2265 20-Pack-Yrs",
+          color = "darkred",
+          size = 4, angle = 90, vjust = 0.5
+        )
+    }
+
+    p <- p +
+      annotate(
+        "segment",
+        x = x_top_end + dx, xend = x_top_end + 5 * dx,
+        y = y_top_end, yend = y_top_end,
+        arrow = grid::arrow(length = unit(0.025, "npc"), type = "closed"),
+        color = "darkred", size = 1
+      )
+
+    if (arrowlabel) {
+      p <- p +
+        annotate(
+          "text",
+          x = x_top_end + 6 * dx, y = y_top_end,
+          label = "\u2265 20-Pack-Yrs",
+          color = "darkred",
+          size = 4, hjust = 0
+        )
+    }
+  }
+
+  if (threshold %in% c("SY", "Both")) {
+    sy_df <- data.frame(x = xrange[1], xend = xrange[2], y = 20, yend = 20)
+    p <- p +
+      geom_segment(
+        data = sy_df,
+        aes(x = x, xend = xend, y = y, yend = yend, color = "20-Year Duration Threshold"),
+        size = 1.2, inherit.aes = FALSE, linetype = "dotted"
+      )
+  }
+
+  if (shg_categorical) {
+    x_breaks <- c(0, 5, 10, 20, 30)
+    y_breaks <- c(0, 10, 20, 30, 40)
+  } else {
+    x_breaks <- seq(xrange[1], xrange[2], 10)
+    y_breaks <- seq(yrange[1], yrange[2], 10)
+  }
+
+  # Add a small upper-end leeway so threshold arrows fit without shifting the origin.
+  leeway <- c(0, 1)
+
+  p <- p +
+    geom_hline(yintercept = 0, color = "black", linewidth = 0.4) +
+    geom_vline(xintercept = 0, color = "black", linewidth = 0.4) +
+    scale_x_continuous(limits = xrange + leeway, breaks = x_breaks, expand = c(0, 0)) +
+    scale_y_continuous(limits = yrange + leeway, breaks = y_breaks, expand = c(0, 0)) +
+    scale_color_manual(
+      name = NULL,
+      values = c(
+        "MECS" = "orange",
+        "SHG" = "blue",
+        "20-Pack-Year Threshold" = "darkred",
+        "20-Year Duration Threshold" = "darkgreen"
+      ),
+      breaks = c("MECS", "SHG", "20-Pack-Year Threshold", "20-Year Duration Threshold"),
+      drop = FALSE
+    ) +
+    theme_minimal()
+
+  if (!is.null(plot_title)) p <- p + labs(title = plot_title)
+  if (!is.null(x_title))    p <- p + labs(x = x_title) else p <- p + labs(x = NULL)
+  if (!is.null(y_title))    p <- p + labs(y = y_title) else p <- p + labs(y = NULL)
+
+  if (!legend_on) {
+    p <- p + theme(
+      legend.position = "none",
+      panel.grid.minor.x = element_blank(),
+      panel.grid.minor.y = element_blank()
+    )
+  } else {
+    p <- p + theme(
+      legend.position = "bottom",
+      panel.grid.minor.x = element_blank(),
+      panel.grid.minor.y = element_blank()
+    ) +
+      guides(color = guide_legend(override.aes = list(size = 3, alpha = 0.8)))
+  }
+
+  return(p)
+}
+```
+
+
+#compare_scatter_facet
+This function generates a 2x2 grid of scatter plots comparing smoking intensity (cigarettes per day) and smoking duration (years) for four subpopulations: Black Female, Black Male, White Female, and White Male. It first converts the MECS dataset’s sex encoding to match the SHG format, then filters the data by race and sex. Each subpopulation is plotted using the compare_scatter_MECS_SHG function, ensuring appropriate axis labels and legend placement. Legends are shown only in the bottom row plots, while top row plots omit x-axis titles and legends for a cleaner presentation.
+
+```{r}
+compare_scatter_facet <- function(
+  data_df, SHG_df,
+  coverage    = 1,
+  seed        = 42,
+  threshold   = "None",
+  bubble      = TRUE,
+  arrowlabel  = FALSE,
+  facet_title = NULL,
+  Ever        = TRUE
+) {
+  # Convert MECS sex encoding to match SHG helper functions.
+  data_df <- data_df %>% mutate(Sex = ifelse(Sex == "M", 0, 1))
+
+  subpops <- list(
+    "Black Females" = data_df %>% filter(Sex == 1, RaceAnalysis == 2),
+    "White Females" = data_df %>% filter(Sex == 1, RaceAnalysis == 1),
+    "Black Males"   = data_df %>% filter(Sex == 0, RaceAnalysis == 2),
+    "White Males"   = data_df %>% filter(Sex == 0, RaceAnalysis == 1)
+  )
+
+  plots <- list()
+
+  plots[[1]] <- compare_scatter_MECS_SHG(
+    subpops[["Black Females"]], SHG_df,
+    plot_title      = "Black Females",
+    x_title         = NULL,
+    y_title         = "Smoking Duration (Years)",
+    legend_on       = FALSE,
+    seed            = seed,
+    coverage        = coverage,
+    threshold       = threshold,
+    shg_categorical = bubble,
+    arrowlabel      = arrowlabel,
+    Ever            = Ever
+  )
+
+  plots[[2]] <- compare_scatter_MECS_SHG(
+    subpops[["White Females"]], SHG_df,
+    plot_title      = "White Females",
+    x_title         = NULL,
+    y_title         = NULL,
+    legend_on       = FALSE,
+    seed            = seed,
+    coverage        = coverage,
+    threshold       = threshold,
+    shg_categorical = bubble,
+    arrowlabel      = FALSE,
+    Ever            = Ever
+  )
+
+  plots[[3]] <- compare_scatter_MECS_SHG(
+    subpops[["Black Males"]], SHG_df,
+    plot_title      = "Black Males",
+    x_title         = "Cigarettes Per Day",
+    y_title         = "Smoking Duration (Years)",
+    legend_on       = FALSE,
+    seed            = seed,
+    coverage        = coverage,
+    threshold       = threshold,
+    shg_categorical = bubble,
+    arrowlabel      = FALSE,
+    Ever            = Ever
+  )
+
+  plots[[4]] <- compare_scatter_MECS_SHG(
+    subpops[["White Males"]], SHG_df,
+    plot_title      = "White Males",
+    x_title         = "Cigarettes Per Day",
+    y_title         = NULL,
+    legend_on       = FALSE,
+    seed            = seed,
+    coverage        = coverage,
+    threshold       = threshold,
+    shg_categorical = bubble,
+    arrowlabel      = FALSE,
+    Ever            = Ever
+  )
+
+  legend_plot <- compare_scatter_MECS_SHG(
+    subpops[["White Males"]], SHG_df,
+    plot_title      = NULL,
+    x_title         = "Cigarettes Per Day",
+    y_title         = NULL,
+    legend_on       = TRUE,
+    seed            = seed,
+    coverage        = coverage,
+    threshold       = threshold,
+    shg_categorical = bubble,
+    arrowlabel      = FALSE,
+    Ever            = Ever
+  )
+
+  legend <- cowplot::get_legend(legend_plot)
+
+  top_row <- plot_grid(plots[[1]], plots[[2]], ncol = 2, align = "hv")
+  bottom_row <- plot_grid(plots[[3]], plots[[4]], ncol = 2, align = "hv")
+  panel_grid <- plot_grid(top_row, bottom_row, ncol = 1, align = "hv")
+
+  if (!is.null(facet_title)) {
+    title_grob <- ggdraw() + draw_label(facet_title, fontface = "bold", size = 14)
+    final_plot <- plot_grid(title_grob, panel_grid, legend, ncol = 1, rel_heights = c(0.08, 1, 0.12))
+  } else {
+    final_plot <- plot_grid(panel_grid, legend, ncol = 1, rel_heights = c(1, 0.12))
+  }
+
+  return(final_plot)
+}
+```
+
+
+## MECS Data
+# Load the MECS data
+This chunk of code prepares and processes smoking-related data from the MECS dataset. It extracts relevant variables, cleans invalid/missing values, and calculates the SmokingYears variable based on smoking behavior. This chunk is foundational for analyzing smoking prevalence and its predictors.
+
+data dictionary
+https://www.ncbi.nlm.nih.gov/projects/gap/cgi-bin/GetListOfAllObjects.cgi?study_id=phs002183.v1.p1&object_type=variable
+Sex=1 Male, Sex=2 Female
+smokstat: 0: Never; 1: Former; 2: Current
+eth: B: Black; H: Hawaiian; J: Japanese; L: Latino; 0: Other; W: White
+numcigs: 0: Never Smoker; 1: 5 Cigarettes or Less; 2: 6-10 Cigarettes; 3: 11-20 Cigarettes; 4: 21-30 Cigarettes; 5: 31 Cigarettes or More
+smkyrs: 0: Never Smoker; 1: 10 Years or Less; 2: 11-20 Years; 3: 21-30 Years; 4: 31-40 Years; 5: 41 Years or More
+smkquit: 1: < 1 Year; 2: 1-2 Years; 3: 3-5 Years; 4: 6-10 Years; 5: 11-15 Years; 6: 16-20 Years; 7: 21 Years or More
+
+```{r}
+# Load the MECS data
+
+# Read the .dta file from the Multi Ethnic Cohort Study (MECS)
+MECS <- read_dta("MEC_Small.dta")
+
+MECS_sh <- MECS %>%
+  rename(
+    Enrollment_Age = q1_age_cohent,
+    smokstat = q1_smokstat,
+    numcigs = q1_numcigs,
+    smkyrs = q1_smkyrs,
+    smkquit = q1_smkquit,
+    PackYears = q1_packyrs
+  ) %>%
+  mutate(
+    SmokeNow = case_when(
+      smokstat == 2 ~ 1,
+      smokstat != 2 ~ 0,
+      is.na(smokstat) ~ NA_real_
+    ),
+    EverSmoker = case_when(
+      smokstat %in% c(1, 2) ~ 1,
+      smokstat == 0 ~ 0,
+      is.na(smokstat) ~ NA_real_
+    ),
+    RaceAnalysis = case_when(
+      q1_eth == "W" ~ 1,
+      q1_eth == "B" ~ 2,
+      TRUE ~ 0
+    ),
+    Sex = case_when(
+      q1_sex == 1 ~ "M",
+      q1_sex == 2 ~ "F",
+      TRUE ~ NA_character_
+    ),
+    # Add columns for plotting, using the old columns as a source
+    CigsPerDay = numcigs,
+    SmokingYears = smkyrs
+  )
+
+MECS_sh_cleaned <- MECS_sh %>%
+  filter(
+    !is.na(EverSmoker),
+    !(EverSmoker == 1 & is.na(PackYears)),
+    !(EverSmoker == 1 & SmokeNow == 0 & is.na(smkquit))
+  )
+```
+
+
+## Visualizations: Distributions of CPD in MECS
+This chunk of code visualizes the distribution of cigarettes smoked per day (CigsPerDay) among Ever Smokers in the MECS dataset. It separates the data into three groups: Full Population, White Population, and Black Population. For each group, the code calculates the number of individuals and overlays their density plots on a single graph. The title includes a summary of group counts, and the plot uses distinct colors and fills to differentiate between the groups, with the x-axis restricted to a plausible range for CigsPerDay.
+
+```{r}
+# Filter the data for EverSmoker == 1 and non-NA CigsPerDay
+# Focus only on individuals who are Ever Smokers and have non-missing values for CigsPerDay.
+filtered_data <- MECS_sh %>%
+  filter(EverSmoker == 1, !is.na(numcigs))
+
+# Create separate groups based on race or full population
+# Full Population: Includes all Ever Smokers.
+filtered_data_full <- filtered_data %>%
+  mutate(RaceGroup = "Full Population")
+
+# White Population: Ever Smokers identified as White (RaceAnalysis == 1).
+filtered_data_white <- filtered_data %>%
+  filter(RaceAnalysis == 1) %>%
+  mutate(RaceGroup = "White")
+
+# Black Population: Ever Smokers identified as Black (RaceAnalysis == 2).
+filtered_data_black <- filtered_data %>%
+  filter(RaceAnalysis == 2) %>%
+  mutate(RaceGroup = "Black")
+
+# Combine the three groups into a single dataframe
+filtered_data_combined <- bind_rows(
+  filtered_data_full, filtered_data_white, filtered_data_black)
+
+# Ensure RaceGroup is an ordered factor (Full, White, Black)
+filtered_data_combined$RaceGroup <- factor(
+  filtered_data_combined$RaceGroup, 
+  levels = c("Full Population", "White", "Black"))
+
+# Calculate the number of individuals in each group for context
+group_counts <- filtered_data_combined %>%
+  group_by(RaceGroup) %>%
+  summarise(Count = n()) %>%
+  ungroup()
+
+# Create a string summarizing group counts to display in the plot title
+group_counts_text <- paste(
+  group_counts$RaceGroup,
+  group_counts$Count,
+  sep = ": ",
+  collapse = "; "
+)
+
+# Define category labels for numcigs
+cigarette_labels <- c(
+  "1" = "<=5", 
+  "2" = "6-10", 
+  "3" = "11-20", 
+  "4" = "21-30", 
+  "5" = ">=31"
+)
+
+# Calculate percentage within each RaceGroup
+filtered_data_percentage <- filtered_data_combined %>%
+  group_by(RaceGroup, numcigs) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  left_join(group_counts %>% rename(Total_Count = Count), by = "RaceGroup") %>%
+  mutate(Percentage = (Count / Total_Count) * 100) %>%
+  select(RaceGroup, numcigs, Percentage) 
+
+# Convert numcigs to a factor with labels
+filtered_data_percentage$numcigs <- factor(filtered_data_percentage$numcigs, 
+                                           levels = names(cigarette_labels), 
+                                           labels = cigarette_labels)
+
+# Create the normalized bar chart
+ggplot(filtered_data_percentage, aes(x = numcigs, y = Percentage, fill = RaceGroup)) +
+  geom_bar(stat = "identity", position = "dodge") +  
+  labs(
+    title = paste("Percentage Distribution of Cigarettes Per Day Among Ever Smokers\n", group_counts_text),
+    x = "Cigarettes Per Day",  
+    y = "Percentage (%)",  
+    fill = "Race Group"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1))
+```
+
+
+```{r}
+## ---------- Ever-smoker subset ----------
+es <- MECS_sh_cleaned %>%
+  filter(EverSmoker == 1)
+
+## ---------- Baseline-table summary ----------
+MECS_demo <- MECS_sh_cleaned %>% 
+  summarise(
+    # Demographic counts
+    Male            = sum(Sex == "M", na.rm = TRUE),
+    Female          = sum(Sex == "F", na.rm = TRUE),
+    White           = sum(RaceAnalysis == 1, na.rm = TRUE),
+    Black           = sum(RaceAnalysis == 2, na.rm = TRUE),
+    Ever_Smoker     = nrow(es),
+    Current_Smoker  = sum(SmokeNow == 1, na.rm = TRUE),
+    Former_Smoker   = sum(EverSmoker == 1 & SmokeNow == 0, na.rm = TRUE),
+
+    # Age (mean ± SD plus range)
+    Mean_Age = mean(Enrollment_Age, na.rm = TRUE),
+    SD_Age   = sd(  Enrollment_Age, na.rm = TRUE),
+    Min_Age  = min(Enrollment_Age, na.rm = TRUE),
+    Max_Age  = max(Enrollment_Age, na.rm = TRUE),
+
+    # Smoking duration — now mean ± SD **and** median [IQR]
+    Mean_SmokingYears   = mean(es$smoking_duration_revised, na.rm = TRUE),
+    SD_SmokingYears     = sd(  es$smoking_duration_revised, na.rm = TRUE),
+    Median_SmokingYears = median(es$smoking_duration_revised, na.rm = TRUE),
+    IQR_SmokingYears    = IQR(   es$smoking_duration_revised, na.rm = TRUE),
+
+    # Smoking intensity — median [IQR]
+    Median_CigsPerDay = median(es$smoking_intensity_revised, na.rm = TRUE),
+    IQR_CigsPerDay    = IQR(   es$smoking_intensity_revised, na.rm = TRUE),
+
+    # Pack-years — median [IQR]
+    Median_PackYears = median(es$PackYears, na.rm = TRUE),
+    IQR_PackYears    = IQR(   es$PackYears, na.rm = TRUE),
+
+    # Birth-year range
+    Min_BY = min(YOB, na.rm = TRUE),
+    Max_BY = max(YOB, na.rm = TRUE)
+  )
+
+MECS_demo
+
+save.image("backup_WS.RData")
+```
+
+
+```{r}
+readr::write_csv(
+  MECS_sh_cleaned,
+  "MECS_sh_cleaned.csv",
+  na = ""
+)
+```
+
+
+
+## Main code
+# Creating target population sizes
+This code calculates the population size of the MECS dataset by birth year (YOB), separated by gender (Females and Males). It also filters the dataset to create summaries for the entire population, White population, and Black population based on their race classification. The calculations include both counts of individuals and the year of birth derived from the enrollment age and data collection year.
+
+
+# taregt population sizes for cleaned MECS data
+This chunk calculates the birth year (YOB) for each individual in the cleaned MECS dataset by subtracting their enrollment age from the data collection year. It then creates three summary tables reporting population sizes by birth year: one for the full dataset, one for the White population, and one for the Black population. Each table groups individuals by YOB and counts the number of males and females, ensuring the data is sorted chronologically.
+
+```{r}
+# Define the data collection year
+data_collection_year <- 1994  # Assuming all individuals enrolled in this year
+
+# Calculate Birth Year (YOB) and add it to the dataframe
+MECS_sh_cleaned <- MECS_sh_cleaned %>%
+  mutate(
+    YOB = data_collection_year - Enrollment_Age  # Birth year is calculated as data collection year minus enrollment age
+  )
+
+# Create the first data table: Population size by birth year for the full dataset
+birth_year_clean <- MECS_sh_cleaned %>%
+  group_by(YOB) %>%  # Group data by calculated birth year
+  summarise(
+    Females = sum(Sex == "F", na.rm = TRUE),  # Count females, excluding missing values
+    Males = sum(Sex == "M", na.rm = TRUE)    # Count males, excluding missing values
+  ) %>%
+  arrange(YOB)  # Arrange the summary table by birth year
+
+# Create the second data table: Population size by birth year for White population
+birth_year_cl_white <- MECS_sh_cleaned %>%
+  filter(RaceAnalysis == 1) %>%  # Filter data for individuals classified as White
+  group_by(YOB) %>%
+  summarise(
+    Females = sum(Sex == "F", na.rm = TRUE),  # Count females
+    Males = sum(Sex == "M", na.rm = TRUE)    # Count males
+  ) %>%
+  arrange(YOB)  # Arrange the summary table by birth year
+
+# Create the third data table: Population size by birth year for Black population
+birth_year_cl_black <- MECS_sh_cleaned %>%
+  filter(RaceAnalysis == 2) %>%  # Filter data for individuals classified as Black
+  group_by(YOB) %>%
+  summarise(
+    Females = sum(Sex == "F", na.rm = TRUE),  # Count females
+    Males = sum(Sex == "M", na.rm = TRUE)    # Count males
+  ) %>%
+  arrange(YOB)  # Arrange the summary table by birth year
+```
+
+
+This chunk visualizes the gender and age composition of the Full, Black, and White subpopulations.
+	1.	Combines data for each subpopulation, adding a Subpopulation column to identify groups.
+	2.	Pivots data into a tidy format, separating Females and Males into a Gender column with corresponding Population values.
+	3.	Creates a faceted bar plot, displaying population size by Year of Birth (YOB), grouped by gender, with separate panels for each subpopulation.
+
+
+
+# with the cleaned data now
+This code combines the cleaned birth-year summary tables for the full, Black, and White populations by adding a “Subpopulation” column, then pivots the data to a tidy format with separate rows for Females and Males. Finally, it creates a faceted bar plot (one facet per subpopulation) showing the gender/age composition by year of birth, using grouped bars and a minimal theme for clarity.
+
+```{r}
+# Combine data for Full, Black, and White populations, adding a Subpopulation column
+BYr_combined <- rbind(
+  transform(birth_year_clean, Subpopulation = "Full"),  # Add "Full" subpopulation
+  transform(birth_year_cl_black, Subpopulation = "Black"),  # Add "Black" subpopulation
+  transform(birth_year_cl_white, Subpopulation = "White")   # Add "White" subpopulation
+)
+
+# Pivot the combined data into a tidy format
+BYr_tidy <- pivot_longer(
+  BYr_combined,
+  cols = c(Females, Males),       # Columns to pivot (Gender categories)
+  names_to = "Gender",            # New column for gender
+  values_to = "Population"        # New column for population counts
+)
+
+# Create a faceted bar plot to visualize gender/age composition
+ggplot(BYr_tidy, aes(x = YOB, y = Population, fill = Gender)) +
+  geom_bar(stat = "identity", position = "dodge") +  # Create grouped bars for each gender
+  facet_wrap(~ Subpopulation, ncol = 1) +           # Facet by subpopulation (one column)
+  labs(
+    title = "Gender/Age Composition by Subpopulation",  # Plot title
+    x = "Year of Birth (YOB)",                         # x-axis label
+    y = "Population",                                  # y-axis label
+    fill = "Gender"                                    # Legend title
+  ) +
+  theme_minimal()                                      # Use a clean, minimal theme
+```
+
+
+This chunk merges three birth year summary tables (full population, White population, and Black population) into a single structured table. It renames columns for clarity and aligns the data by Year of Birth (YOB). The table is then formatted using kableExtra for improved readability and exported as a CSV file (table_combined.csv) for further use.
+
+
+
+## Combining and Exporting Birth-Year Summaries (Cleaned Data)
+This code chunk merges three birth-year summary tables—one each for the full, White, and Black populations in the cleaned MECS dataset—into a single table (`table_cleaned_combined`). The columns are renamed for clarity, and the table is then formatted with **kableExtra** for ease of viewing. Finally, the table is exported to a CSV file so it can be edited or included directly in the final report.
+
+```{r merge-birth-year-cleaned, echo=TRUE, message=FALSE, warning=FALSE}
+# Combine "cleaned" data tables into a single wide table
+table_cleaned_combined <- birth_year_clean %>%
+  rename(Females_Full = Females, Males_Full = Males) %>%
+  left_join(
+    birth_year_cl_white %>% 
+      rename(Females_White = Females, Males_White = Males),
+    by = "YOB"
+  ) %>%
+  left_join(
+    birth_year_cl_black %>% 
+      rename(Females_Black = Females, Males_Black = Males),
+    by = "YOB"
+  )
+
+# Create a styled table using kableExtra
+BYR_table_cleaned <- table_cleaned_combined %>%
+  kbl(
+    caption = "Year of Birth (YOB) and Gender Counts by Subpopulation (Cleaned)",
+    col.names = c("Year of Birth (YOB)", 
+                  "Females (Full-Cleaned)", "Males (Full-Cleaned)",
+                  "Females (White-Cleaned)", "Males (White-Cleaned)",
+                  "Females (Black-Cleaned)", "Males (Black-Cleaned)"),
+    align = "c"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width = FALSE
+  )
+
+# Export to CSV for further use in Excel or reporting
+write.csv(table_cleaned_combined, "table_cleaned_combined.csv", row.names = FALSE)
+
+save.image("backup_WS.RData")
+```
+
+
+# Creating simulated populations
+This chunk of code creates simulated populations using a stochastic process (SHGbyr function) to match a target population size derived from the cleaned MECS birth-year target (BYr_trgt). The process iteratively extends the simulation until the target size is reached, saving the final simulation results to a CSV file to avoid rerunning the time-intensive process. A pre-saved file can be reloaded for further analysis.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Set up a target size for the simulated population based on the birth year summary
+BYr_trgt <- sufftrgt(birth_year_clean, 10)  # Adjust target size using a scaling factor of 10
+
+# !!!!! WARNING: THE FOLLOWING PROCESS IS TIME-CONSUMING AND CAN TAKE SEVERAL HOURS
+# To avoid running this process, skip to the "Done!" section below.
+
+# Run the initial round of the simulation using a random seed of 40
+sim_rslts <- SHGbyr(BYr_trgt, data_collection_year, seed = 40)  # Generate initial simulated data with seed 40
+# Convert simulation results to birth year summary format
+sim_byr <- SHGdat2BY(sim_rslts)  # Summarize simulated data by birth year
+# Check population coverage by calculating shortages compared to the target
+shrtge <- suff_shortage(sim_byr, BYr_trgt)  # Calculate shortages by birth year
+initial_shrtge <- sum(shrtge[, 2:3])  # Total initial shortage across males and females
+
+# Iteratively extend the simulation using a random seed of 30 until the target population size is reached
+sim_comp_rslt <- SHGbyr_extend(sim_rslts, BYr_trgt, data_collection_year, seed = 30)  # Extend simulation with seed 30
+# Convert updated simulation results to birth year summary format
+sim_byr_ud <- SHGdat2BY(sim_comp_rslt)  # Summarize updated simulation data by birth year
+# Check updated population coverage after extending the simulation
+shrtge_ud <- suff_shortage(sim_byr_ud, BYr_trgt)  # Calculate updated shortages
+final_shrtge <- sum(shrtge_ud[, 2:3])  # Total final shortage across males and females
+
+# Save the final simulation results to a CSV file to avoid rerunning
+write.csv(sim_comp_rslt, "sim_comp_rslt.csv", row.names = FALSE)  # Save results for future use
+
+# !!!!! DONE! DO NOT RERUN THIS PROCESS UNLESS NECESSARY.
+# Instead of rerunning, load the pre-saved simulation results below.
+
+# Load pre-saved simulation results from a CSV file
+# sim_comp_rslt <- read.csv("sim_comp_rslt.csv")  # Uncomment to load saved results
+
+save.image("backup_WS.RData")
+```
+
+
+# Redrawing for the cleaned MECS data's sample size
+This code generates 10,000 samples from the simulated population using cleaned birth-year data with a 99% confidence interval. It then extracts prevalence metrics and overall, female, and male smoking distribution data from these samples, preparing the results for further analysis or plotting. Finally, the workspace is saved to “backup_WS.RData” for backup purposes.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Generate samples from the simulated population using cleaned birth year data
+# Draws 10,000 samples based on birth year targets with a 99% confidence interval.
+smpl_rslts_clean <- rep_smpl_dist(sim_comp_rslt, birth_year_clean, 10000, CI = 0.99)
+
+# Extract prevalence data (e.g., ever smokers, current smokers) from the cleaned sampled results
+prvlnc_SHG_smpld_clean <- extr_prvlnc_smpld_rslts(smpl_rslts_clean)
+
+# Extract distribution data for the full cleaned population
+dist_SHG_smpld_clean <- extr_dist_smpld_rslts(smpl_rslts_clean)
+
+# Extract distribution data for female and male subpopulations in cleaned data
+dist_SHG_f_smpld_clean <- extr_dist_smpld_rslts(smpl_rslts_clean, population = "female")
+dist_SHG_m_smpld_clean <- extr_dist_smpld_rslts(smpl_rslts_clean, population = "male")
+
+save.image("backup_WS.RData")
+```
+
+
+# Sampled White Population Analysis (Cleaned Data)
+This code generates a sample dataset for the cleaned white population using repeated sampling (10,000 iterations at a 99% confidence interval) based on the white birth-year summary. It then extracts both prevalence metrics and smoking distribution data—overall as well as separately for white females and males—from the sampled results. Finally, the workspace is saved as “backup_WS.RData” for backup and further analysis.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Generate a sample dataset for the cleaned white population, matching the birth year distribution
+# Using repeated sampling with 10,000 iterations and 99% confidence interval
+smpl_rslts_wh_clean <- rep_smpl_dist(sim_comp_rslt, birth_year_cl_white, 10000, CI = 0.99)
+
+# Extract prevalence data from the cleaned white population sample
+prvlnc_SHG_wh_smpld_clean <- extr_prvlnc_smpld_rslts(smpl_rslts_wh_clean)
+# Uncomment the following line to inspect the prevalence data
+# head(prvlnc_SHG_wh_smpld_clean)
+
+# Extract overall smoking distribution data from the cleaned white population sample
+dist_SHG_wh_smpld_clean <- extr_dist_smpld_rslts(smpl_rslts_wh_clean)
+# Uncomment the following line to inspect the distribution data
+# head(dist_SHG_wh_smpld_clean)
+
+# Extract smoking distribution data specifically for white females in cleaned data
+dist_SHG_whf_smpld_clean <- extr_dist_smpld_rslts(smpl_rslts_wh_clean, population = "female")
+
+# Extract smoking distribution data specifically for white males in cleaned data
+dist_SHG_whm_smpld_clean <- extr_dist_smpld_rslts(smpl_rslts_wh_clean, population = "male")
+
+save.image("backup_WS.RData")
+```
+
+
+# Sampled Black Population Analysis (Cleaned Data)
+This code generates a sample dataset for the cleaned Black population by repeatedly sampling (10,000 iterations at a 99% confidence interval) based on the Black birth-year summary. It then extracts prevalence metrics and overall, female, and male smoking distribution data from the sampled results. Finally, the workspace is saved as “backup_WS.RData” for backup and further analysis.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Generate a sample dataset for the cleaned black population, matching the birth year distribution
+# Using repeated sampling with 10,000 iterations and a 99% confidence interval
+smpl_rslts_bl_clean <- rep_smpl_dist(sim_comp_rslt, birth_year_cl_black, 10000, CI = 0.99)
+
+# Extract prevalence data from the cleaned black population sample
+prvlnc_SHG_bl_smpld_clean <- extr_prvlnc_smpld_rslts(smpl_rslts_bl_clean)
+# Uncomment the following line to inspect the prevalence data
+# head(prvlnc_SHG_bl_smpld_clean)
+
+# Extract overall smoking distribution data from the cleaned black population sample
+dist_SHG_bl_smpld_clean <- extr_dist_smpld_rslts(smpl_rslts_bl_clean)
+# Uncomment the following line to inspect the distribution data
+# head(dist_SHG_bl_smpld_clean)
+
+# Extract smoking distribution data specifically for black females in cleaned data
+dist_SHG_blf_smpld_clean <- extr_dist_smpld_rslts(smpl_rslts_bl_clean, population = "female")
+
+# Extract smoking distribution data specifically for black males in cleaned data
+dist_SHG_blm_smpld_clean <- extr_dist_smpld_rslts(smpl_rslts_bl_clean, population = "male")
+
+save.image("backup_WS.RData")
+```
+
+
+# Writing to xlsx
+This batch of code creates an Excel workbook and stores 18 different SHG-related dataframes as separate sheets. These dataframes summarize smoking distribution results for different populations, including both raw and cleaned versions. The final workbook is saved as SHG_MECS_smkdist.xlsx, making it easier to access and analyze these results later.
+
+```{r}
+# Create a new workbook
+wb_SHG_MECS <- createWorkbook()
+
+# List of the 18 dataframes summarizing SHG eligibility results for MECS
+SHG_dataframes <- list(
+#  "SHG" = dist_SHG_smpld, 
+#  "SHG_m" = dist_SHG_m_smpld, 
+#  "SHG_f" = dist_SHG_f_smpld,
+  "SHG_cl" = dist_SHG_smpld_clean,
+  "SHG_m_cl" = dist_SHG_m_smpld_clean,
+  "SHG_f_cl" = dist_SHG_f_smpld_clean,
+#  "SHG_bl" = dist_SHG_bl_smpld,
+#  "SHG_blm" = dist_SHG_blm_smpld,
+#  "SHG_blf" = dist_SHG_blf_smpld,
+  "SHG_bl_cl" = dist_SHG_bl_smpld_clean,
+  "SHG_blm_cl" = dist_SHG_blm_smpld_clean,
+  "SHG_blf_cl" = dist_SHG_blf_smpld_clean,
+#  "SHG_wh" = dist_SHG_wh_smpld, 
+#  "SHG_whm" = dist_SHG_whm_smpld,
+#  "SHG_whf" = dist_SHG_whf_smpld,
+  "SHG_wh_cl" = dist_SHG_wh_smpld_clean,
+  "SHG_whm_cl" = dist_SHG_whm_smpld_clean, 
+  "SHG_whf_cl" = dist_SHG_whf_smpld_clean
+)
+
+# Loop through and add each dataframe to a separate sheet
+for (name in names(SHG_dataframes)) {
+  addWorksheet(wb_SHG_MECS, name)
+  writeData(wb_SHG_MECS, name, SHG_dataframes[[name]])
+}
+
+# Save the workbook
+saveWorkbook(wb_SHG_MECS, "SHG_MECS_smkdist.xlsx", overwrite = TRUE)
+```
+
+
+# Distribution Plots
+
+This chunk compares the smoking distributions of the white and black populations using the stacked_side_plots function. It takes as input the sampled distribution data for white (dist_SHG_wh_smpld) and black (dist_SHG_bl_smpld) populations, alongside the corresponding MECS dataset filtered by race (RaceAnalysis == 1 for white and RaceAnalysis == 2 for black). The column titles are customized to reflect the populations being compared, and a confidence interval (CI) of 99% is applied to both plots.
+
+
+# The graphs for the cleaned data and cleaned simulation results
+This code uses the stacked_side_plots() function to generate side‐by‐side, stacked distribution plots comparing smoking histories between cleaned MECS data and SHG simulation results for white (RaceAnalysis == 1) and black (RaceAnalysis == 2) populations. The plot, which includes a 99% confidence interval for the simulation data, is displayed and then saved as a high-resolution PNG image (800×1000 pixels at 300 dpi) for further review.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Compare smoking distributions for white and black populations using cleaned data
+MECS_BW_cl <- stacked_side_plots(
+  dist_SHG_bl_smpld_clean,                  # Cleaned black population sampled distribution
+  dist_SHG_wh_smpld_clean,                  # Cleaned white population sampled distribution
+  MECS_sh_cleaned[MECS_sh_cleaned$RaceAnalysis == 2,], # Cleaned MECS data for black population
+  MECS_sh_cleaned[MECS_sh_cleaned$RaceAnalysis == 1,], # Cleaned MECS data for white population
+  maintitle = "Smoking History Distributions: MECS vs. SHG",
+  column_titles = c("Black Population", "White Population"), # Updated titles
+  CI = 99  # Confidence interval for the plots
+)
+
+MECS_BW_cl
+
+# Save the plot as PNG with 800x1000 pixel dimensions
+ggsave(
+  filename = "MECS_BW_cl.PNG", 
+  plot = MECS_BW_cl,
+  width = 800 / 100,  # Convert pixels to inches (assuming 300 dpi)
+  height = 1000 / 100, 
+  dpi = 300
+)
+```
+
+
+This code generates side‐by‐side, stacked distribution plots comparing smoking histories between male and female subpopulations using cleaned MECS data versus SHG simulation results. It uses the stacked_side_plots() function to produce separate panels for males and females—with a 99% confidence interval applied to the simulation data—and labels the facets as “Male Population” and “Female Population” under the overall title “Smoking History Distributions: MECS vs. SHG.”
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Compare smoking distributions for male and female populations using cleaned data
+stacked_side_plots(
+  dist_SHG_f_smpld_clean,                  # Cleaned female population sampled distribution
+  dist_SHG_m_smpld_clean,                  # Cleaned male population sampled distribution
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "F",], # Cleaned MECS data for female population
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "M",], # Cleaned MECS data for male population
+  maintitle = "Smoking History Distributions: MECS vs. SHG",
+  column_titles = c("Female Population", "Male Population"), # Updated titles
+  CI = 99  # Confidence interval for the plots
+)
+```
+
+
+This code compares smoking distributions for white and black male subpopulations using cleaned MECS data and SHG simulation results. It calls the stacked_side_plots() function to generate side-by-side plots for white male and black male groups, applying a 99% confidence interval to the simulation data and labeling the facets accordingly. The output helps assess differences in smoking histories between these male subpopulations.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Compare smoking distributions for white and black male populations using cleaned data
+stacked_side_plots(
+  dist_SHG_blm_smpld_clean,                                         # Cleaned black male population sampled distribution
+  dist_SHG_whm_smpld_clean,                                         # Cleaned white male population sampled distribution
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "M" & MECS_sh_cleaned$RaceAnalysis == 2, ],  # Cleaned MECS data for black male population
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "M" & MECS_sh_cleaned$RaceAnalysis == 1, ],  # Cleaned MECS data for white male population
+  maintitle = "Smoking History Distributions: MECS vs. SHG",
+  column_titles = c("Black Male Population", "White Male Population"), # Updated titles
+  CI = 99  # Confidence interval for the plots
+)
+```
+
+
+This code generates side‐by‐side stacked distribution plots comparing the smoking histories of white versus black female populations using cleaned MECS data and SHG simulation results. It filters the MECS data for females by race, then uses the stacked_side_plots() function (with a 99% confidence interval) to display the distributions in separate panels labeled “White Female Population” and “Black Female Population.”
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Compare smoking distributions for white and black female populations using cleaned data
+stacked_side_plots(
+  dist_SHG_blf_smpld_clean,                                         # Cleaned black female population sampled distribution
+  dist_SHG_whf_smpld_clean,                                         # Cleaned white female population sampled distribution
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "F" & MECS_sh_cleaned$RaceAnalysis == 2, ],  # Cleaned MECS data for black female population
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "F" & MECS_sh_cleaned$RaceAnalysis == 1, ],  # Cleaned MECS data for white female population
+  maintitle = "Smoking History Distributions: MECS vs. SHG",
+  column_titles = c("Black Female Population", "White Female Population"), # Updated titles
+  CI = 99  # Confidence interval for the plots
+)
+```
+
+
+This code applies the flatten_distribution() function to multiple SHG simulation distribution data frames—both for overall and subpopulation splits (male, female, black, white) in both raw and cleaned forms. It converts the continuous distributions for CigsPerDay and Smoking_Years into a piecewise-constant, bar-chart style format (leaving Pack_Years unchanged), storing the results in new variables. Finally, the workspace is saved to “backup_WS.RData” as a backup.
+
+```{r}
+# Suppose dist_SHG_smpld is your 512 x 10 data frame
+#dist_SHG_flat <- flatten_distribution(dist_SHG_smpld)
+#dist_SHG_m_flat <- flatten_distribution(dist_SHG_m_smpld)
+#dist_SHG_f_flat <- flatten_distribution(dist_SHG_f_smpld)
+
+dist_SHG_flat_clean <- flatten_distribution(dist_SHG_smpld_clean)
+dist_SHG_m_flat_clean <- flatten_distribution(dist_SHG_m_smpld_clean)
+dist_SHG_f_flat_clean <- flatten_distribution(dist_SHG_f_smpld_clean)
+
+#dist_SHG_bl_flat <- flatten_distribution(dist_SHG_bl_smpld)
+#dist_SHG_blm_flat <- flatten_distribution(dist_SHG_blm_smpld)
+#dist_SHG_blf_flat <- flatten_distribution(dist_SHG_blf_smpld)
+
+dist_SHG_bl_flat_clean <- flatten_distribution(dist_SHG_bl_smpld_clean)
+dist_SHG_blm_flat_clean <- flatten_distribution(dist_SHG_blm_smpld_clean)
+dist_SHG_blf_flat_clean <- flatten_distribution(dist_SHG_blf_smpld_clean)
+
+#dist_SHG_wh_flat <- flatten_distribution(dist_SHG_wh_smpld)
+#dist_SHG_whm_flat <- flatten_distribution(dist_SHG_whm_smpld)
+#dist_SHG_whf_flat <- flatten_distribution(dist_SHG_whf_smpld)
+
+dist_SHG_wh_flat_clean <- flatten_distribution(dist_SHG_wh_smpld_clean)
+dist_SHG_whm_flat_clean <- flatten_distribution(dist_SHG_whm_smpld_clean)
+dist_SHG_whf_flat_clean <- flatten_distribution(dist_SHG_whf_smpld_clean)
+
+save.image("backup_WS.RData")
+```
+
+
+# The graphs for the cleaned data and cleaned simulation results
+This code block generates side‐by‐side stacked plots comparing the smoking distributions of white and black populations using cleaned MECS data and cleaned SHG simulation results. The stacked_side_plots() function combines the flattened SHG distributions (for white and black populations) with the corresponding filtered MECS data (based on RaceAnalysis), applying a 99% confidence interval. The resulting plot, titled “Smoking History Distributions: MECS vs. SHG,” is then saved as a high-resolution PNG file (800×1000 pixels at 300 dpi) for further analysis.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Compare smoking distributions for white and black populations using cleaned data
+MECS_BW_fl_cl <- stacked_side_plots(
+  dist_SHG_bl_flat_clean,                  # Cleaned black population sampled distribution
+  dist_SHG_wh_flat_clean,                  # Cleaned white population sampled distribution
+  MECS_sh_cleaned[MECS_sh_cleaned$RaceAnalysis == 2,], # Cleaned MECS data for black population
+  MECS_sh_cleaned[MECS_sh_cleaned$RaceAnalysis == 1,], # Cleaned MECS data for white population
+  maintitle = "Smoking History Distributions: MECS vs. SHG",
+  column_titles = c("Black Population", "White Population"), # Updated titles
+  CI = 99  # Confidence interval for the plots
+)
+
+MECS_BW_fl_cl
+
+# Save the plot as PNG with 800x1000 pixel dimensions
+ggsave(
+  filename = "MECS_BW_fl_cl.PNG", 
+  plot = MECS_BW_fl_cl,
+  width = 800 / 100,  # Convert pixels to inches (assuming 300 dpi)
+  height = 1000 / 100, 
+  dpi = 300
+)
+```
+
+
+This code uses the stacked_side_plots() function to generate side‐by‐side, stacked plots comparing the smoking distributions between male and female populations using cleaned MECS data and corresponding cleaned SHG simulation results. The MECS dataset is filtered by sex (with “M” for males and “F” for females), and the resulting plot—with a 99% confidence interval—is displayed and then saved as a high-resolution PNG file (800×1000 pixels at 300 dpi).
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Compare smoking distributions for male and female populations using cleaned data
+MECS_FM_fl_cl <- stacked_side_plots(
+  dist_SHG_f_flat_clean,                  # Cleaned female population sampled distribution
+  dist_SHG_m_flat_clean,                  # Cleaned male population sampled distribution
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "F",], # Cleaned MECS data for female population
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "M",], # Cleaned MECS data for male population
+  maintitle = "Smoking History Distributions: MECS vs. SHG",
+  column_titles = c("Female Population", "Male Population"), # Updated titles
+  CI = 99  # Confidence interval for the plots
+)
+
+MECS_FM_fl_cl
+
+# Save the plot as PNG with 800x1000 pixel dimensions
+ggsave(
+  filename = "MECS_FM_fl_cl.PNG", 
+  plot = MECS_FM_fl_cl,
+  width = 800 / 100,  # Convert pixels to inches (assuming 300 dpi)
+  height = 1000 / 100, 
+  dpi = 300
+)
+```
+
+
+This code uses the stacked_side_plots() function to generate side‐by‐side stacked plots comparing smoking distributions between white and black male populations using cleaned MECS data and cleaned SHG simulation results. The MECS dataset is filtered for males with RaceAnalysis equal to 1 (white) and 2 (black), and the plot—displaying a 99% confidence interval—is saved as a high-resolution PNG (800×1000 pixels).
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Compare smoking distributions for white and black male populations using cleaned data
+MECS_BWM_fl_cl <- stacked_side_plots(
+  dist_SHG_blm_flat_clean,                                         # Cleaned black male population sampled distribution
+  dist_SHG_whm_flat_clean,                                         # Cleaned white male population sampled distribution
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "M" & MECS_sh_cleaned$RaceAnalysis == 2, ],  # Cleaned MECS data for black male population
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "M" & MECS_sh_cleaned$RaceAnalysis == 1, ],  # Cleaned MECS data for white male population
+  maintitle = "Smoking History Distributions: MECS vs. SHG",
+  column_titles = c("Black Male Population", "White Male Population"), 
+  # Updated titles
+  CI = 99  # Confidence interval for the plots
+)
+
+MECS_BWM_fl_cl
+
+# Save the plot as PNG with 800x1000 pixel dimensions
+ggsave(
+  filename = "MECS_BWM_fl_cl.PNG", 
+  plot = MECS_BWM_fl_cl,
+  width = 800 / 100,  # Convert pixels to inches (assuming 300 dpi)
+  height = 1000 / 100, 
+  dpi = 300
+)
+```
+
+
+This chunk uses the stacked_side_plots() function to compare the smoking distributions between white and black female populations using cleaned MECS data and cleaned SHG simulation results. It filters the MECS data for females by race (white: RaceAnalysis == 1, black: RaceAnalysis == 2), applies a 99% confidence interval, and labels the facets as “White Female Population” and “Black Female Population.” The final plot is then saved as a high-resolution PNG file.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Compare smoking distributions for white and black female populations using cleaned data
+MECS_BWF_fl_cl <- stacked_side_plots(
+  dist_SHG_blf_flat_clean,                                         # Cleaned black female population sampled distribution
+  dist_SHG_whf_flat_clean,                                         # Cleaned white female population sampled distribution
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "F" & MECS_sh_cleaned$RaceAnalysis == 2, ],  # Cleaned MECS data for black female population
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "F" & MECS_sh_cleaned$RaceAnalysis == 1, ],  # Cleaned MECS data for white female population
+  maintitle = "Smoking History Distributions: MECS vs. SHG",
+  column_titles = c("Black Female Population", "White Female Population"), 
+  # Updated titles
+  CI = 99  # Confidence interval for the plots
+)
+
+MECS_BWF_fl_cl
+
+# Save the plot as PNG with 800x1000 pixel dimensions
+ggsave(
+  filename = "MECS_BWF_fl_cl.PNG", 
+  plot = MECS_BWF_fl_cl,
+  width = 800 / 100,  # Convert pixels to inches (assuming 300 dpi)
+  height = 1000 / 100, 
+  dpi = 300
+)
+```
+
+
+
+
+```{r}
+# First row: Black vs. White (all participants)
+MECS_BW <- stacked_plots(
+  dist_SHG_bl_flat_clean,
+  dist_SHG_wh_flat_clean,
+  MECS_sh_cleaned[MECS_sh_cleaned$RaceAnalysis == 2,],
+  MECS_sh_cleaned[MECS_sh_cleaned$RaceAnalysis == 1,],
+  maintitle = "Smoking History Distributions: MECS vs. SHG",
+  row_titles = c("Blacks", "Whites"),
+  CI = 99,
+  include_title = FALSE,
+  include_legend = FALSE
+)
+
+# Second row: Females
+MECS_BWF <- stacked_plots(
+  dist_SHG_blf_flat_clean,
+  dist_SHG_whf_flat_clean,
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "F" & MECS_sh_cleaned$RaceAnalysis == 2,],
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "F" & MECS_sh_cleaned$RaceAnalysis == 1,],
+  row_titles = c("Black Females", "White Females"),
+  CI = 99,
+  include_title = FALSE,
+  include_legend = FALSE
+)
+
+# Third row: Males (legend included)
+MECS_BWM <- stacked_plots(
+  dist_SHG_blm_flat_clean,
+  dist_SHG_whm_flat_clean,
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "M" & MECS_sh_cleaned$RaceAnalysis == 2,],
+  MECS_sh_cleaned[MECS_sh_cleaned$Sex == "M" & MECS_sh_cleaned$RaceAnalysis == 1,],
+  row_titles = c("Black Males", "White Males"),
+  CI = 99,
+  include_title = FALSE,
+  include_legend = TRUE
+)
+
+# Stack plots with spacing
+final_figure <- MECS_BW /
+                plot_spacer() /
+                MECS_BWF /
+                plot_spacer() /
+                MECS_BWM +
+  plot_layout(ncol = 1, heights = c(1, 0.1, 1, 0.1, 1.1))
+
+# Add a shared y-axis label
+y_axis_label <- ggdraw() +
+  draw_label("Density", angle = 90, hjust = 0.5, size = 20)
+
+# Combine everything with label on the left
+final_figure_labeled <- plot_grid(
+  y_axis_label,
+  final_figure,
+  ncol = 2,
+  rel_widths = c(0.04, 1)
+)
+
+# Save the full plot
+ggsave(
+  filename = "MECS_Combined_Plots_HL.png",
+  plot = final_figure_labeled,
+  width = 1500 / 100,  # 1500 px wide
+  height = 2000 / 100, # 2000 px tall
+  dpi = 300,
+  bg = "white"
+)
+```
+
+
+#eligibility rates
+This code generates screening eligibility sampling results using the rep_smpl_screening() function with 10,000 iterations at a 99% confidence interval. It creates separate outputs for the overall, white, and black populations and then saves the workspace for backup.
+
+
+This code generates screening eligibility sampling results for the cleaned data using the rep_smpl_screening() function with 10,000 iterations at a 99% confidence interval. It produces separate outputs for the overall cleaned population, as well as for the cleaned white and black populations, and then saves the workspace as a backup.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+smpl_rslts_eligible_cl <- 
+  rep_smpl_screening(sim_comp_rslt, birth_year_clean, 10000, CI = 0.99)
+
+smpl_rslts_elig_wh_cl <- 
+  rep_smpl_screening(sim_comp_rslt, birth_year_cl_white, 10000, CI = 0.99)
+
+smpl_rslts_elig_bl_cl <- 
+  rep_smpl_screening(sim_comp_rslt, birth_year_cl_black, 10000, CI = 0.99)
+
+save.image("backup_WS.RData")
+```
+
+
+This code computes screening eligibility metrics for the cleaned MECS data by subpopulation using the screening_eligible() function. It generates separate tables for the full population, for males and females, and then for white and black groups (further split by sex), before merging each set into a combined data frame with a leading “Population” column for clear reporting and comparison.
+
+```{r}
+# full population
+elig_mecs_full <- screening_eligible(MECS_sh_cleaned, dataset_type = "MECS")
+elig_mecs_m <- screening_eligible(
+  MECS_sh_cleaned %>% filter(Sex == "M"), dataset_type = "MECS")
+elig_mecs_f <- screening_eligible(
+  MECS_sh_cleaned %>% filter(Sex == "F"), dataset_type = "MECS")
+
+elig_mecs_full_combined <- bind_rows(
+  elig_mecs_full %>% mutate(Population = "Full"),
+  elig_mecs_m %>% mutate(Population = "Male"),
+  elig_mecs_f %>% mutate(Population = "Female")
+) %>%
+  select(Population, everything())  # Ensure "Population" is the first column
+
+# white population
+elig_mecs_wh <- screening_eligible(
+  MECS_sh_cleaned %>% filter(RaceAnalysis == 1), 
+  dataset_type = "MECS")
+elig_mecs_whm <- screening_eligible(
+  MECS_sh_cleaned %>% filter(RaceAnalysis == 1 & Sex == "M"), 
+  dataset_type = "MECS")
+elig_mecs_whf <- screening_eligible(
+  MECS_sh_cleaned %>% filter(RaceAnalysis == 1 & Sex == "F"), 
+  dataset_type = "MECS")
+
+# Merge into a single dataframe
+elig_mecs_wh_combined <- bind_rows(
+  elig_mecs_wh %>% mutate(Population = "White"),
+  elig_mecs_whm %>% mutate(Population = "White Male"),
+  elig_mecs_whf %>% mutate(Population = "White Female")
+) %>%
+  select(Population, everything())  # Ensure "Population" is the first column
+
+# black population
+elig_mecs_bl <- screening_eligible(
+  MECS_sh_cleaned %>% filter(RaceAnalysis == 2), 
+  dataset_type = "MECS")
+elig_mecs_blm <- screening_eligible(
+  MECS_sh_cleaned %>% filter(RaceAnalysis == 2 & Sex == "M"), 
+  dataset_type = "MECS")
+elig_mecs_blf <- screening_eligible(
+  MECS_sh_cleaned %>% filter(RaceAnalysis == 2 & Sex == "F"), 
+  dataset_type = "MECS")
+
+# Merge into a single dataframe
+elig_mecs_bl_combined <- bind_rows(
+  elig_mecs_bl %>% mutate(Population = "Black"),
+  elig_mecs_blm %>% mutate(Population = "Black Male"),
+  elig_mecs_blf %>% mutate(Population = "Black Female")
+) %>%
+  select(Population, everything())  # Ensure "Population" is the first column
+```
+
+
+# Constructing an Eligibility Comparison Table
+This code calls the compare_Data_SHG() function to create a comparison table of eligibility metrics for the full, white, and black populations between the MECS data and SHG simulation results (with total population included and raw counts used). The resulting table is then exported as a CSV file (“eligibility_table.csv”) with row names.
+
+
+This code calls the compare_Data_SHG() function using the combined eligibility metrics for the cleaned MECS data (full, white, and black populations) and their corresponding SHG simulation results (raw counts). It then exports the resulting comparison table to a CSV file named “eligibility_cl_table_raw.csv” with row names.
+
+```{r}
+comp_table_cl_raw <- compare_Data_SHG(elig_mecs_full_combined,
+                               elig_mecs_wh_combined,
+                               elig_mecs_bl_combined,
+                               smpl_rslts_eligible_cl, 
+                               smpl_rslts_elig_wh_cl, 
+                               smpl_rslts_elig_bl_cl,
+                               total = "On", 
+                               percentage = "Off", 
+                               ever = "Off",
+                               comparison = "All")
+
+style_compare_table(comp_table_cl_raw, diff = "Off", dataname = "MECS")
+
+# Exports comp_table to a CSV file
+# write.csv(comp_table_cl_raw, "eligibility_cl_table_raw.csv", row.names = TRUE)
+```
+
+
+This chunk calls the compare_Data_SHG() function using the combined eligibility metrics from the cleaned MECS data (for full, white, and black populations) and their corresponding cleaned SHG simulation results. In this call, the options are set to include the total population row and convert counts to percentages (with percentage = "On" and ever = "Off"), while all subpopulations are compared. The resulting comparison table is then exported to a CSV file named “eligibility_cl_table.csv” (with row names).
+
+```{r}
+comp_table_cl <- compare_Data_SHG(elig_mecs_full_combined,
+                               elig_mecs_wh_combined,
+                               elig_mecs_bl_combined,
+                               smpl_rslts_eligible_cl, 
+                               smpl_rslts_elig_wh_cl, 
+                               smpl_rslts_elig_bl_cl,
+                               total = "On", 
+                               percentage = "On", 
+                               ever = "Off",
+                               comparison = "All")
+
+style_compare_table(comp_table_cl, diff = "Off", dataname = "MECS")
+
+# Exports comp_table to a CSV file
+# write.csv(comp_table_cl, "eligibility_cl_table.csv", row.names = TRUE)
+```
+
+
+This chunk calls the compare_Data_SHG() function using the cleaned eligibility metrics for the full, white, and black populations along with the corresponding cleaned SHG simulation results. In this call, both total counts and ever-smoker percentages are computed (with total = "On", percentage = "On", and ever = "On"), comparing all subpopulations. The resulting table is then exported to “eligibility_cl_table_ever.csv”, and the entire workspace is saved as “backup_WS.RData”.
+
+```{r}
+comp_table_ev <- compare_Data_SHG(elig_mecs_full_combined,
+                               elig_mecs_wh_combined,
+                               elig_mecs_bl_combined,
+                               smpl_rslts_eligible_cl, 
+                               smpl_rslts_elig_wh_cl, 
+                               smpl_rslts_elig_bl_cl,
+                               total = "Off", 
+                               percentage = "On", 
+                               ever = "On",
+                               comparison = "All")
+
+style_compare_table(comp_table_ev, diff = "Off", dataname = "MECS")
+
+# Exports comp_table to a CSV file
+# write.csv(comp_table_ev, "eligibility_cl_table_ever.csv", row.names = TRUE)
+
+save.image("backup_WS.RData")
+```
+
+
+This code generates a comparison table of screening eligibility metrics for the cleaned MECS data versus cleaned SHG simulation results using the compare_Data_SHG() function. In this call, the total population row is excluded (total = "Off"), and eligibility percentages are computed based on ever-smoker counts (percentage = "On", ever = "On"). Additionally, the diff = "On" option highlights differences between the two datasets. Finally, the resulting table is exported as “eligibility_table_ev_diff.csv”.
+
+```{r}
+comp_table_ev_diff <- compare_Data_SHG(elig_mecs_full_combined,
+                               elig_mecs_wh_combined,
+                               elig_mecs_bl_combined,
+                               smpl_rslts_eligible_cl, 
+                               smpl_rslts_elig_wh_cl, 
+                               smpl_rslts_elig_bl_cl,
+                               total = "Off",
+                               comparison = "All", 
+                               percentage = "On",
+                               ever = "On",
+                               diff = "On")
+
+style_compare_table(comp_table_ev_diff, diff = "On", dataname = "MECS")
+
+# Exports comp_table to a CSV file
+#write.csv(comp_table_ev_diff, "eligibility_table_ev_diff.csv", row.names = TRUE)
+```
+
+
+This code calls the compare_Data_SHG() function using the cleaned eligibility metrics for the full, white, and black populations along with the corresponding cleaned SHG simulation results. In this call, total population counts are excluded (total = "Off"), and eligibility values are converted to percentages based on ever-smoker counts (percentage = "On", ever = "Off"). Additionally, the diff = "On" option is used to highlight the differences between the datasets. The resulting comparison table is then exported as a CSV file named “eligibility_table_diff.csv”.
+
+```{r}
+comp_table_diff <- compare_Data_SHG(elig_mecs_full_combined,
+                               elig_mecs_wh_combined,
+                               elig_mecs_bl_combined,
+                               smpl_rslts_eligible_cl, 
+                               smpl_rslts_elig_wh_cl, 
+                               smpl_rslts_elig_bl_cl,
+                               total = "Off",
+                               comparison = "All", 
+                               percentage = "On",
+                               ever = "Off",
+                               diff = "On")
+
+style_compare_table(comp_table_diff, diff = "On", dataname = "MECS")
+
+# Exports comp_table to a CSV file
+# write.csv(comp_table_diff, "eligibility_table_diff.csv", row.names = TRUE)
+```
+
+
+Saves the entire current workspace (all objects, functions, and data) to a file named “backup_WS.RData”, providing a backup that can later be reloaded into R.
+
+```{r}
+save.image("backup_WS.RData")
+```
+
+
+This code calls the style_compare_table() function to format and colorize the eligibility comparison table (comp_table_diff) by highlighting differences (with diff = "On") and labeling the data columns as “MECS”. It also saves the styled table as an HTML file (“comp_table.html”) and then displays the resulting table.
+
+```{r}
+styled_table <- style_compare_table(comp_table_diff, diff = "On", 
+                                    save_as_html = "comp_table.html",
+                                    dataname = "MECS")
+styled_table
+```
+
+
+This code applies the style_compare_table() function to the eligibility comparison table comp_table_ev_diff (which includes ever-smoker metrics) to produce a formatted, colorized table with differences highlighted. The function saves the resulting table as an HTML file named “comp_ev_table.html” and then displays the styled table.
+
+```{r}
+styled_table_ev <- style_compare_table(comp_table_ev_diff, diff = "On", 
+                                    save_as_html = "comp_ev_table.html",
+                                    dataname = "MECS")
+styled_table_ev
+```
+
+
+This chunk reruns the styled comparison-table export directly, without storing the HTML object in a separate variable. It is useful when regenerating the formatted difference table after changes to the comparison object or table styling function.
+
+```{r}
+style_compare_table(comp_table_diff, diff = "On", 
+                                    save_as_html = "comp_table.html",
+                                    dataname = "MECS")
+```
+
+
+This chunk renders the difference comparison table as a heatmap-style HTML table using the table-based heatmap formatter. It provides an alternative visual summary of the same comparison values.
+
+```{r}
+style_compare_heatmap_table(comp_table_diff, difference="On", save_as_html = "comp_heatmap_table.html")
+```
+
+
+This chunk renders the same difference comparison object with the main heatmap styling function and exports it as HTML. It serves as a more visual alternative to the standard styled comparison table.
+
+```{r}
+style_compare_heatmap(comp_table_diff, difference="On", save_as_html = "comp_heatmap.html")
+```
+
+
+This line saves the entire R workspace, including all current objects (data, functions, results), to a file named backup_WS.RData. This allows for easy restoration of the session later without needing to re-run previous code.
+
+```{r}
+save.image("backup_WS.RData")
+```
+
+
+This chunk constructs the non-percentage eligibility comparison object used as the basis for the MECS forest plot and related heatmap exports. It compares observed MECS counts against SHG summaries without converting values to percentages or ever-smoker denominators.
+
+```{r}
+comp_hm <- compare_Data_SHG(elig_mecs_full_combined,
+                               elig_mecs_wh_combined,
+                               elig_mecs_bl_combined,
+                               smpl_rslts_eligible_cl, 
+                               smpl_rslts_elig_wh_cl, 
+                               smpl_rslts_elig_bl_cl,
+                               total = "Off",
+                               comparison = "All", 
+                               percentage = "Off",
+                               ever = "Off",
+                               diff = "Off")
+
+# Exports comp_table to a CSV file
+# write.csv(comp_table_diff, "eligibility_table_diff.csv", row.names = TRUE)
+style_compare_table(comp_hm, diff = "Off", dataname = "MECS")
+```
+
+
+This chunk applies the heatmap styling to the non-percentage comparison object and exports the result as both HTML and PNG. The output is the main count-based heatmap summary for MECS versus SHG.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+comp_hm_40 <- style_compare_heatmap(comp_hm, difference="Off", save_as_html = "comp_hm_MECS_40.html", rel_diff = TRUE, include_legend = FALSE, bins = 40)
+
+comp_hm_40
+
+webshot(
+  url        = "comp_hm_MECS_40.html",
+  file       = "comp_hm_MECS_40.png",
+  selector = "table",        # ← clip to the first <table> element
+  vwidth     = 3600,         # or whatever width in pixels you need
+  vheight    = 2000,          # adjust so that the entire table + legend fits
+  zoom     = 5               # (we’ll adjust zoom below)
+)
+```
+
+
+This chunk creates the ever-smoker-percentage comparison object used for the threshold-style heatmap summary. It restricts the denominator to ever-smokers while keeping the same subgroup structure as the raw comparison table.
+
+```{r}
+comp_hm_ev <- compare_Data_SHG(elig_mecs_full_combined,
+                               elig_mecs_wh_combined,
+                               elig_mecs_bl_combined,
+                               smpl_rslts_eligible_cl, 
+                               smpl_rslts_elig_wh_cl, 
+                               smpl_rslts_elig_bl_cl,
+                               total = "Off",
+                               comparison = "All", 
+                               percentage = "On",
+                               ever = "On",
+                               diff = "Off")
+
+# Exports comp_table to a CSV file
+# write.csv(comp_table_diff, "eligibility_table_diff.csv", row.names = TRUE)
+style_compare_table(comp_hm_ev, diff = "Off", dataname = "MECS")
+```
+
+
+This chunk styles and exports the ever-smoker-percentage comparison object as an HTML heatmap and PNG. It provides the MECS threshold heatmap output for the standardized cohort workflow.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+comp_hmev_40 <- style_compare_heatmap(comp_hm_ev, difference="Off", save_as_html = "comp_hmev_MECS_40.html", rel_diff = TRUE, include_legend = TRUE, bins = 40)
+
+comp_hmev_40
+
+webshot(
+  url        = "comp_hmev_MECS_40.html",
+  file       = "comp_hmev_MECS_40.png",
+  selector = "table",        # ← clip to the first <table> element
+  vwidth     = 3600,         # or whatever width in pixels you need
+  vheight    = 2000,          # adjust so that the entire table + legend fits
+  zoom     = 5               # (we’ll adjust zoom below)
+)
+```
+
+# Forest Plots
+
+This chunk draws the cleaned MECS forest plot using the count-based comparison object and exports the result as a PNG. It summarizes directional deviation of SHG from observed MECS values across the main subpopulations and screening-related measures.
+
+```{r}
+# Example usage:
+p <- plot_deviation_forest(comp_hm, xlim = 2.5)
+print(p)
+
+# Save the plot as PNG with 800x1000 pixel dimensions
+ggsave(
+  filename = "MECS_forest.PNG", 
+  plot = p,
+  width = 800 / 100,  # Convert pixels to inches (assuming 300 dpi)
+  height = 800 / 100, 
+  dpi = 300
+)
+```
+
+
+# Scatter plots
+
+This code calls the compare_scatter_facet() function to generate a faceted scatter plot comparing Smoking Duration versus Cigarettes Per Day between the MECS dataset and the SHG simulation results, without applying any threshold filtering. The resulting plot is stored in the variable SYvCPD and is immediately displayed. Finally, the plot is saved as a high-resolution PNG file (“SYvCPD_MECS.PNG”) using ggsave(), with dimensions set by converting 800 pixels to inches (at 300 dpi).
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+SYvCPD <- compare_scatter_facet(
+  MECS_sh_cleaned,
+  sim_comp_rslt,
+  bubble = TRUE,
+  threshold = "Both",
+  arrowlabel = TRUE
+)
+
+SYvCPD
+
+
+# Save the plot as PNG with 800x1000 pixel dimensions
+ggsave(
+  filename = "SYvCPD_MECS.PNG", 
+  plot = SYvCPD,
+  width = 800 / 100,  # Convert pixels to inches (assuming 300 dpi)
+  height = 800 / 100, 
+  dpi = 300
+)
+```
+
+
+This code calls compare_scatter_facet() with shg_cat = FALSE to generate a faceted scatter plot comparing MECS and SHG data for smoking duration versus cigarettes per day—using a continuous (jittered) representation for the SHG side rather than categorical bubbles. The resulting plot is stored in SYvCPD_scat and displayed, and then saved as a high-resolution PNG file (“SYvCPD_MECS_scat.PNG”) with dimensions set to 800×800 pixels (converted to inches at 300 dpi).
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+SYvCPD_cat <- compare_scatter_facet(MECS_sh_cleaned, sim_comp_rslt, bubble = FALSE, arrowlabel = TRUE)
+
+SYvCPD_cat
+
+# Save the plot as PNG with 800x1000 pixel dimensions
+ggsave(
+  filename = "SYvCPD_MECS_cat.PNG", 
+  plot = SYvCPD_cat,
+  width = 800 / 100,  # Convert pixels to inches (assuming 300 dpi)
+  height = 800 / 100, 
+  dpi = 300
+)
+```
+
+
+# Prevalence Plots
+
+This chunk prepares data for prevalence plots by summarizing MECS data into prevalence metrics for different populations using the dat2age function. Specifically:
+	1.	dat_bl_sum: Summarizes data for the black population (RaceAnalysis == 2).
+	2.	dat_wh_sum: Summarizes data for the white population (RaceAnalysis == 1).
+	3.	dat_full_sum: Summarizes data for the full MECS population without filtering by race.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+# Prevalence Data Preparation
+# `dat2age`: Processes MECS data into prevalence metrics by age group
+
+# Create summarized prevalence data for the black population
+dat_bl_sum <- dat2age(
+  MECS_sh[which(MECS_sh$RaceAnalysis == 2), ]  # Filter MECS data for RaceAnalysis == 2 (black population)
+)
+
+# Create summarized prevalence data for the white population
+dat_wh_sum <- dat2age(
+  MECS_sh[which(MECS_sh$RaceAnalysis == 1), ]  # Filter MECS data for RaceAnalysis == 1 (white population)
+)
+
+# Create summarized prevalence data for the entire population
+dat_full_sum <- dat2age(
+  MECS_sh  # Use the full MECS dataset without any race filtering
+)
+```
+
+
+This chunk generates a combined visualization of smoking prevalence for three populations: full population, white population, and black population. Each prevalence plot compares SHG-simulated smoking data to observed MECS data. The resulting figure includes:
+	1.	Prevalence of Ever Smokers and Prevalence of Current Smokers for each population.
+	2.	A title for the figure (“Smoking Prevalences”).
+	3.	A single, shared legend placed at the bottom of the combined figure.
+
+```{r}
+# Smoking Prevalence Plots
+
+# Create the prevalence plot for the full population
+prvlnc_full_plot <- prvlnc_plot(
+  prvlnc_SHG_smpld,    # Simulated SHG prevalence data for the full population
+  dat_full_sum,        # Observed prevalence data for the full population
+  subtitle = "On",     # Subtitle toggle (will show plot-specific titles)
+  population = "Full Population",  # Label for the population
+  CI = 99,             # Confidence interval for SHG prevalence data
+  legend = "Off"       # Turn off legend for this plot
+)
+
+# Create the prevalence plot for the white population
+prvlnc_wh_plot <- prvlnc_plot(
+  prvlnc_SHG_wh_smpld, # Simulated SHG prevalence data for the white population
+  dat_wh_sum,          # Observed prevalence data for the white population
+  population = "White Population", # Label for the population
+  CI = 99,             # Confidence interval for SHG prevalence data
+  legend = "Off"       # Turn off legend for this plot
+)
+
+# Create the prevalence plot for the black population
+prvlnc_bl_plot <- prvlnc_plot(
+  prvlnc_SHG_bl_smpld, # Simulated SHG prevalence data for the black population
+  dat_bl_sum,          # Observed prevalence data for the black population
+  population = "Black Population", # Label for the population
+  CI = 99,             # Confidence interval for SHG prevalence data
+  legend = "On"        # Turn on legend for this plot (shared across all)
+)
+
+# Create a figure title as a standalone ggplot object
+title_prvlnc <- ggplot() +
+  ggtitle("Smoking Prevalences") +  # Main title for the combined plot
+  theme_void() +                    # No axes or gridlines
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 13, face = "bold")  # Center and style the title
+  )
+
+# Combine all prevalence plots into a single figure
+prvlnc_fig <- (
+  title_prvlnc /                 # Add the main title on top
+  prvlnc_full_plot /             # Add the full population prevalence plot
+  prvlnc_wh_plot /               # Add the white population prevalence plot
+  prvlnc_bl_plot                 # Add the black population prevalence plot
+) +
+  plot_layout(
+    heights = c(0, 1, 1, 1),     # Allocate zero height for the title and equal heights for plots
+    guides = "collect"           # Collect all legends into a single shared legend
+  ) +
+  plot_annotation(
+    theme = theme(
+      legend.position = "bottom",    # Place the legend at the bottom
+      legend.box = "horizontal",     # Arrange legend items in a horizontal box
+      legend.title = element_blank() # Remove the legend title
+    )
+  )
+
+# Render the combined prevalence plot
+prvlnc_fig
+```
+
+
+# Median Tables
+This section builds category-based smoking-summary tables for the six MECS subpopulations. Observed MECS values are summarized on the native categorical scale, while SHG values are first mapped to the same MECS category structure before medians and IQR bounds are calculated from one 10x subgroup-matched sample.
+
+```{r}
+make_mecs_byr_target <- function(observed_df, coverage = 10) {
+  observed_df %>%
+    mutate(Sex = ifelse(Sex == "M", 0, 1)) %>%
+    SHGdat2BY() %>%
+    sufftrgt(coverage = coverage)
+}
+
+prepare_mecs_observed <- function(df) {
+  df %>%
+    mutate(
+      CigsPerDay_mid = case_when(
+        CigsPerDay == 1 ~  3,
+        CigsPerDay == 2 ~  8,
+        CigsPerDay == 3 ~ 15,
+        CigsPerDay == 4 ~ 25,
+        CigsPerDay == 5 ~ 35,
+        TRUE            ~ NA_real_
+      ),
+      SmokingYears_mid = case_when(
+        SmokingYears == 1 ~  5,
+        SmokingYears == 2 ~ 15,
+        SmokingYears == 3 ~ 25,
+        SmokingYears == 4 ~ 35,
+        SmokingYears == 5 ~ 45,
+        TRUE              ~ NA_real_
+      )
+    )
+}
+
+prepare_shg_for_mecs <- function(df) {
+  df %>%
+    mutate(
+      CigsPerDay_mid = case_when(
+        CigsPerDay <= 5  ~  3,
+        CigsPerDay <= 10 ~  8,
+        CigsPerDay <= 20 ~ 15,
+        CigsPerDay <= 30 ~ 25,
+        CigsPerDay >  30 ~ 35,
+        TRUE             ~ NA_real_
+      ),
+      SmokingYears_mid = case_when(
+        Smoking_Years <= 10 ~  5,
+        Smoking_Years <= 20 ~ 15,
+        Smoking_Years <= 30 ~ 25,
+        Smoking_Years <= 40 ~ 35,
+        Smoking_Years >  40 ~ 45,
+        TRUE                ~ NA_real_
+      )
+    )
+}
+
+summarize_mecs_quantiles <- function(df, dataset_type = c("observed", "simulated")) {
+  dataset_type <- match.arg(dataset_type)
+
+  if (dataset_type == "observed") {
+    smokers <- prepare_mecs_observed(df) %>%
+      filter(EverSmoker == 1)
+
+    cigs_values <- smokers$CigsPerDay_mid
+    pack_values <- smokers$PackYears
+    year_values <- smokers$SmokingYears_mid
+  } else {
+    smokers <- prepare_shg_for_mecs(df) %>%
+      filter(Eversmoker == 1)
+
+    cigs_values <- smokers$CigsPerDay_mid
+    pack_values <- smokers$Pack_Years
+    year_values <- smokers$SmokingYears_mid
+  }
+
+  tibble(
+    CigsPerDay_Median = median(cigs_values, na.rm = TRUE),
+    CigsPerDay_IQR_Low = as.numeric(quantile(cigs_values, 0.25, na.rm = TRUE)),
+    CigsPerDay_IQR_High = as.numeric(quantile(cigs_values, 0.75, na.rm = TRUE)),
+    PackYears_Median = median(pack_values, na.rm = TRUE),
+    PackYears_IQR_Low = as.numeric(quantile(pack_values, 0.25, na.rm = TRUE)),
+    PackYears_IQR_High = as.numeric(quantile(pack_values, 0.75, na.rm = TRUE)),
+    SmokingYears_Median = median(year_values, na.rm = TRUE),
+    SmokingYears_IQR_Low = as.numeric(quantile(year_values, 0.25, na.rm = TRUE)),
+    SmokingYears_IQR_High = as.numeric(quantile(year_values, 0.75, na.rm = TRUE))
+  )
+}
+
+make_median_diff_row <- function(observed_row, simulated_row) {
+  tibble(
+    Source = "% Difference",
+    CigsPerDay_Median = 100 * (simulated_row$CigsPerDay_Median - observed_row$CigsPerDay_Median) / observed_row$CigsPerDay_Median,
+    CigsPerDay_IQR_Low = NA_real_,
+    CigsPerDay_IQR_High = NA_real_,
+    PackYears_Median = 100 * (simulated_row$PackYears_Median - observed_row$PackYears_Median) / observed_row$PackYears_Median,
+    PackYears_IQR_Low = NA_real_,
+    PackYears_IQR_High = NA_real_,
+    SmokingYears_Median = 100 * (simulated_row$SmokingYears_Median - observed_row$SmokingYears_Median) / observed_row$SmokingYears_Median,
+    SmokingYears_IQR_Low = NA_real_,
+    SmokingYears_IQR_High = NA_real_
+  )
+}
+
+build_median_table <- function(observed_df, shg_pool, coverage = 10, seed = 42) {
+  byr_target_10x <- make_mecs_byr_target(observed_df, coverage = coverage)
+  simulated_10x <- sample_SHG(shg_pool, byr_target_10x, seed = seed)
+
+  observed_row <- summarize_mecs_quantiles(observed_df, dataset_type = "observed")
+  simulated_row <- summarize_mecs_quantiles(simulated_10x, dataset_type = "simulated")
+
+  bind_rows(
+    observed_row %>% mutate(Source = "Observed", .before = 1),
+    simulated_row %>% mutate(Source = "Simulated", .before = 1),
+    make_median_diff_row(observed_row, simulated_row)
+  )
+}
+
+mecs_table_inputs <- list(
+  Blacks = MECS_sh_cleaned %>% filter(RaceAnalysis == 2),
+  Whites = MECS_sh_cleaned %>% filter(RaceAnalysis == 1),
+  `Black Females` = MECS_sh_cleaned %>% filter(RaceAnalysis == 2, Sex == "F"),
+  `Black Males` = MECS_sh_cleaned %>% filter(RaceAnalysis == 2, Sex == "M"),
+  `White Females` = MECS_sh_cleaned %>% filter(RaceAnalysis == 1, Sex == "F"),
+  `White Males` = MECS_sh_cleaned %>% filter(RaceAnalysis == 1, Sex == "M")
+)
+```
+
+
+This chunk builds one combined long table of category-based medians and IQR bounds for all six MECS subpopulations. The table is exported as a CSV for downstream review and reporting.
+
+```{r}
+MECS_median_tables_long <- purrr::imap_dfr(
+  mecs_table_inputs,
+  ~ build_median_table(.x, sim_comp_rslt, coverage = 10, seed = 42) %>%
+    mutate(Population = .y, .before = 1)
+)
+
+MECS_median_tables_long
+
+write.csv(MECS_median_tables_long, "MECS_median_tables_long.csv", row.names = FALSE)
+```
+
+
+# Threshold Tables
+This section builds threshold tables for the MECS subpopulations using the existing comparison objects already created in the workflow. It produces one table using ever-smoker denominators and one using total-population denominators, while retaining the SHG confidence intervals for simulated values.
+
+```{r}
+parse_shg_summary <- function(x) {
+  tibble(
+    Value = as.numeric(str_extract(x, "^[0-9.]+")),
+    Lower_CI = as.numeric(str_extract(x, "(?<=\\()[0-9.]+(?=, )")),
+    Upper_CI = as.numeric(str_extract(x, "(?<=, )[0-9.]+(?=\\))"))
+  )
+}
+
+build_threshold_table_from_compare <- function(comp_table) {
+  threshold_rows <- c("PY20", "PY30", "SY20", "SY30")
+  populations <- c("Black", "White", "Black Female", "Black Male", "White Female", "White Male")
+  population_labels <- c(
+    Black = "Blacks",
+    White = "Whites",
+    `Black Female` = "Black Females",
+    `Black Male` = "Black Males",
+    `White Female` = "White Females",
+    `White Male` = "White Males"
+  )
+
+  row_idx <- match(threshold_rows, rownames(comp_table))
+
+  purrr::map_dfr(populations, function(pop) {
+    observed_vals <- as.numeric(comp_table[row_idx, paste0(pop, "_Data"), drop = TRUE])
+    simulated_stats <- purrr::map_dfr(
+      as.character(comp_table[row_idx, paste0(pop, "_SHG"), drop = TRUE]),
+      parse_shg_summary
+    )
+    diff_vals <- simulated_stats$Value - observed_vals
+
+    bind_rows(
+      tibble(
+        Population = population_labels[[pop]],
+        Source = "Observed",
+        PY20_Value = observed_vals[1], PY20_Lower_CI = NA_real_, PY20_Upper_CI = NA_real_,
+        PY30_Value = observed_vals[2], PY30_Lower_CI = NA_real_, PY30_Upper_CI = NA_real_,
+        SY20_Value = observed_vals[3], SY20_Lower_CI = NA_real_, SY20_Upper_CI = NA_real_,
+        SY30_Value = observed_vals[4], SY30_Lower_CI = NA_real_, SY30_Upper_CI = NA_real_
+      ),
+      tibble(
+        Population = population_labels[[pop]],
+        Source = "Simulated",
+        PY20_Value = simulated_stats$Value[1], PY20_Lower_CI = simulated_stats$Lower_CI[1], PY20_Upper_CI = simulated_stats$Upper_CI[1],
+        PY30_Value = simulated_stats$Value[2], PY30_Lower_CI = simulated_stats$Lower_CI[2], PY30_Upper_CI = simulated_stats$Upper_CI[2],
+        SY20_Value = simulated_stats$Value[3], SY20_Lower_CI = simulated_stats$Lower_CI[3], SY20_Upper_CI = simulated_stats$Upper_CI[3],
+        SY30_Value = simulated_stats$Value[4], SY30_Lower_CI = simulated_stats$Lower_CI[4], SY30_Upper_CI = simulated_stats$Upper_CI[4]
+      ),
+      tibble(
+        Population = population_labels[[pop]],
+        Source = "Difference",
+        PY20_Value = diff_vals[1], PY20_Lower_CI = NA_real_, PY20_Upper_CI = NA_real_,
+        PY30_Value = diff_vals[2], PY30_Lower_CI = NA_real_, PY30_Upper_CI = NA_real_,
+        SY20_Value = diff_vals[3], SY20_Lower_CI = NA_real_, SY20_Upper_CI = NA_real_,
+        SY30_Value = diff_vals[4], SY30_Lower_CI = NA_real_, SY30_Upper_CI = NA_real_
+      )
+    )
+  })
+}
+```
+
+
+This chunk builds the threshold table using ever-smoker denominators and exports it as a CSV file for later formatting or inclusion in manuscript materials.
+
+```{r}
+MECS_threshold_table_ever_long <- build_threshold_table_from_compare(comp_table_ev)
+
+MECS_threshold_table_ever_long
+
+write.csv(MECS_threshold_table_ever_long, "MECS_threshold_table_ever_long.csv", row.names = FALSE)
+```
+
+
+This chunk builds the threshold table using total-population denominators and exports it as a CSV file. Together with the ever-smoker table, it provides the two threshold summaries parallel to the other cohort outputs.
+
+```{r}
+MECS_threshold_table_total_long <- build_threshold_table_from_compare(comp_table_cl)
+
+MECS_threshold_table_total_long
+
+write.csv(MECS_threshold_table_total_long, "MECS_threshold_table_total_long.csv", row.names = FALSE)
+```
+
+
+# Probability Tables
+This section builds probability-of-superiority tables that compare MECS and SHG distributions on the shared MECS category scale. For each subgroup and measure, it reports both `P(Simulated > Observed)` and the centered transformation `2P - 1`.
+
+```{r}
+prob_superiority <- function(sim_values, obs_values) {
+  sim_values <- sim_values[!is.na(sim_values)]
+  obs_values <- obs_values[!is.na(obs_values)]
+
+  if (length(sim_values) == 0 || length(obs_values) == 0) {
+    return(NA_real_)
+  }
+
+  combined <- c(sim_values, obs_values)
+  ranks <- rank(combined, ties.method = "average")
+
+  n_sim <- as.numeric(length(sim_values))
+  n_obs <- as.numeric(length(obs_values))
+  rank_sum_sim <- sum(ranks[seq_len(length(sim_values))])
+
+  (rank_sum_sim - n_sim * (n_sim + 1) / 2) / (n_sim * n_obs)
+}
+
+build_probability_row <- function(observed_df, shg_pool, coverage = 10, seed = 42) {
+  byr_target_10x <- make_mecs_byr_target(observed_df, coverage = coverage)
+  simulated_10x <- sample_SHG(shg_pool, byr_target_10x, seed = seed)
+
+  observed_ever <- prepare_mecs_observed(observed_df) %>%
+    filter(EverSmoker == 1)
+  simulated_ever <- prepare_shg_for_mecs(simulated_10x) %>%
+    filter(Eversmoker == 1)
+
+  p_cigs <- prob_superiority(simulated_ever$CigsPerDay_mid, observed_ever$CigsPerDay_mid)
+  p_pack <- prob_superiority(simulated_ever$Pack_Years, observed_ever$PackYears)
+  p_years <- prob_superiority(simulated_ever$SmokingYears_mid, observed_ever$SmokingYears_mid)
+
+  tibble(
+    CigsPerDay_P = p_cigs,
+    CigsPerDay_2Pminus1 = 2 * p_cigs - 1,
+    PackYears_P = p_pack,
+    PackYears_2Pminus1 = 2 * p_pack - 1,
+    SmokingYears_P = p_years,
+    SmokingYears_2Pminus1 = 2 * p_years - 1
+  )
+}
+```
+
+
+This chunk builds the probability table for all six MECS subpopulations using one 10x subgroup-matched SHG sample for each subgroup. The resulting CSV mirrors the standardized probability-table export structure.
+
+```{r}
+MECS_probability_tables_long <- purrr::imap_dfr(
+  mecs_table_inputs,
+  ~ build_probability_row(.x, sim_comp_rslt, coverage = 10, seed = 42) %>%
+    mutate(Population = .y, .before = 1)
+)
+
+MECS_probability_tables_long
+
+write.csv(MECS_probability_tables_long, "MECS_probability_tables_long.csv", row.names = FALSE)
+```
+
+
+This line saves the entire R workspace, including all current objects (data, functions, results), to a file named backup_WS.RData. This allows for easy restoration of the session later without needing to re-run previous code.
+
+```{r}
+save.image("backup_WS.RData")
+```
+
+
