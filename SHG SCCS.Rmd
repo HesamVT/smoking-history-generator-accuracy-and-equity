@@ -1459,7 +1459,8 @@ dist_plot_2 <- function(dist_smpled, data, target,
     # Custom legend and color styling
     scale_color_manual(
       values = c("SCCS" = "orange", "SHG" = "blue"),
-      breaks = c("SCCS", "SHG")
+      breaks = c("SCCS", "SHG"),
+      labels = c("SCCS (observed)", "SHG (simulated)")
     ) +
     scale_fill_manual(
       values = setNames("lightblue", CI_label),
@@ -2874,6 +2875,12 @@ compare_scatter_SCCS_SHG_binned <- function(
         "20-Year Duration Threshold" = "darkgreen"
       ),
       breaks = c("SCCS", "SHG", "20-Pack-Year Threshold", "20-Year Duration Threshold"),
+      labels = c(
+        "SCCS (observed)",
+        "SHG (simulated)",
+        "20-Pack-Year Threshold",
+        "20-Year Duration Threshold"
+      ),
       drop   = FALSE
     ) +
     theme_minimal()
@@ -3597,7 +3604,7 @@ SCCS_BW <- stacked_plots(
   SCCS_sh_cleaned[SCCS_sh_cleaned$RaceAnalysis == 2,],
   SCCS_sh_cleaned[SCCS_sh_cleaned$RaceAnalysis == 1,],
   maintitle = "Smoking History Distributions: SCCS vs. SHG",
-  row_titles = c("Blacks", "Whites"),
+  row_titles = c("Black Adults", "White Adults"),
   CI = 99,
   include_title = FALSE,
   include_legend = FALSE  # suppress here
@@ -3663,7 +3670,7 @@ SCCS_BW_only <- stacked_plots(
   SCCS_sh_cleaned[SCCS_sh_cleaned$RaceAnalysis == 2, ],
   SCCS_sh_cleaned[SCCS_sh_cleaned$RaceAnalysis == 1, ],
   maintitle = "Smoking History Distributions: SCCS vs. SHG",
-  row_titles = c("Blacks", "Whites"),
+  row_titles = c("Black Adults", "White Adults"),
   CI = 99,
   include_title = FALSE,
   include_legend = TRUE

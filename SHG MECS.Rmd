@@ -1688,7 +1688,8 @@ dist_plot_2 <- function(dist_smpled, data, target,
     ) +
     scale_color_manual(
       values = c("MECS" = "orange", "SHG" = "blue"),
-      breaks = c("MECS", "SHG")
+      breaks = c("MECS", "SHG"),
+      labels = c("MECS (observed)", "SHG (simulated)")
     ) +
     scale_fill_manual(
       values = setNames("lightblue", CI_label),
@@ -3058,6 +3059,12 @@ compare_scatter_MECS_SHG <- function(
         "20-Year Duration Threshold" = "darkgreen"
       ),
       breaks = c("MECS", "SHG", "20-Pack-Year Threshold", "20-Year Duration Threshold"),
+      labels = c(
+        "MECS (observed)",
+        "SHG (simulated)",
+        "20-Pack-Year Threshold",
+        "20-Year Duration Threshold"
+      ),
       drop = FALSE
     ) +
     theme_minimal()
@@ -3928,7 +3935,7 @@ MECS_BW <- stacked_plots(
   MECS_sh_cleaned[MECS_sh_cleaned$RaceAnalysis == 2,],
   MECS_sh_cleaned[MECS_sh_cleaned$RaceAnalysis == 1,],
   maintitle = "Smoking History Distributions: MECS vs. SHG",
-  row_titles = c("Blacks", "Whites"),
+  row_titles = c("Black Adults", "White Adults"),
   CI = 99,
   include_title = FALSE,
   include_legend = FALSE
@@ -3984,6 +3991,43 @@ ggsave(
   plot = final_figure_labeled,
   width = 1500 / 100,  # 1500 px wide
   height = 2000 / 100, # 2000 px tall
+  dpi = 300,
+  bg = "white"
+)
+```
+
+This chunk produces a simplified Black-versus-White distribution figure only, with a shared y-axis label and a single legend. It mirrors the SCCS-only Black/White figure structure while using the flattened MECS distribution objects.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+MECS_BW_only <- stacked_plots(
+  dist_SHG_bl_flat_clean,
+  dist_SHG_wh_flat_clean,
+  MECS_sh_cleaned[MECS_sh_cleaned$RaceAnalysis == 2, ],
+  MECS_sh_cleaned[MECS_sh_cleaned$RaceAnalysis == 1, ],
+  maintitle = "Smoking History Distributions: MECS vs. SHG",
+  row_titles = c("Black Adults", "White Adults"),
+  CI = 99,
+  include_title = FALSE,
+  include_legend = TRUE
+)
+
+y_axis_label_bw <- ggdraw() +
+  draw_label("Density", angle = 90, hjust = 0.5, size = 20)
+
+MECS_BW_only_labeled <- plot_grid(
+  y_axis_label_bw,
+  MECS_BW_only,
+  ncol = 2,
+  rel_widths = c(0.04, 1)
+)
+
+MECS_BW_only_labeled
+
+ggsave(
+  filename = "MECS_BW.png",
+  plot = MECS_BW_only_labeled,
+  width = 1500 / 100,
+  height = 800 / 100,
   dpi = 300,
   bg = "white"
 )
@@ -4771,5 +4815,3 @@ This line saves the entire R workspace, including all current objects (data, fun
 ```{r}
 save.image("backup_WS.RData")
 ```
-
-

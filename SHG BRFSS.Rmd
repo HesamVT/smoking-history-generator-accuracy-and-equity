@@ -1514,7 +1514,8 @@ dist_plot_2 <- function(dist_smpled, data, target,
     ) +
     scale_color_manual(
       values = c("BRFSS" = "orange", "SHG" = "blue"),
-      breaks = c("BRFSS", "SHG")
+      breaks = c("BRFSS", "SHG"),
+      labels = c("BRFSS (observed)", "SHG (simulated)")
     ) +
     scale_fill_manual(
       values = setNames("lightblue", CI_label),
@@ -2835,6 +2836,12 @@ compare_scatter_BRFSS_SHG_binned <- function(
         "20-Year Duration Threshold" = "darkgreen"
       ),
       breaks = c("BRFSS", "SHG", "20-Pack-Year Threshold", "20-Year Duration Threshold"),
+      labels = c(
+        "BRFSS (observed)",
+        "SHG (simulated)",
+        "20-Pack-Year Threshold",
+        "20-Year Duration Threshold"
+      ),
       drop   = FALSE
     ) +
     theme_minimal()
@@ -3606,7 +3613,7 @@ BRFSS_BW_cl <- stacked_side_plots(
   BRFSS_sh_cl[BRFSS_sh_cl$RaceAnalysis == 2,], # Cleaned BRFSS data for black population
   BRFSS_sh_cl[BRFSS_sh_cl$RaceAnalysis == 1,], # Cleaned BRFSS data for white population
   maintitle = "Smoking History Distributions: BRFSS vs. SHG",
-  column_titles = c("Black Population", "White Population"), # Updated titles
+  column_titles = c("Black Adults", "White Adults"),
   CI = 99  # Confidence interval for the plots
 )
 
@@ -3721,7 +3728,7 @@ BRFSS_BW <- stacked_plots(
   BRFSS_sh_cl[BRFSS_sh_cl$RaceAnalysis == 2,],
   BRFSS_sh_cl[BRFSS_sh_cl$RaceAnalysis == 1,],
   maintitle = NULL,
-  row_titles = c("Blacks", "Whites"),
+  row_titles = c("Black Adults", "White Adults"),
   CI = 99,
   include_title = TRUE,
   include_legend = FALSE  # suppress here
@@ -3940,7 +3947,7 @@ BRFSS_BW_a80 <- stacked_plots(
   BRFSS_sh_cl_age80[BRFSS_sh_cl_age80$RaceAnalysis == 2,],
   BRFSS_sh_cl_age80[BRFSS_sh_cl_age80$RaceAnalysis == 1,],
   maintitle = NULL,
-  row_titles = c("Blacks", "Whites"),
+  row_titles = c("Black Adults", "White Adults"),
   CI = 99,
   include_title = TRUE,
   include_legend = FALSE  # suppress here
@@ -3992,6 +3999,43 @@ ggsave(
   plot = final_figure_labeled_a80,
   width = 1500 / 100,  # 2400 px width at 300 dpi
   height = 2000 / 100, # 1000 px height
+  dpi = 300,
+  bg = "white"
+)
+```
+
+This chunk produces a simplified Black-versus-White distribution figure only for the analytic `age80` BRFSS dataset, with a shared y-axis label and a single legend.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+BRFSS_BW_only_a80 <- stacked_plots(
+  dist_SHG_bl_smpld_a80,
+  dist_SHG_wh_smpld_a80,
+  BRFSS_sh_cl_age80[BRFSS_sh_cl_age80$RaceAnalysis == 2, ],
+  BRFSS_sh_cl_age80[BRFSS_sh_cl_age80$RaceAnalysis == 1, ],
+  maintitle = "Smoking History Distributions: BRFSS vs. SHG",
+  row_titles = c("Black Adults", "White Adults"),
+  CI = 99,
+  include_title = FALSE,
+  include_legend = TRUE
+)
+
+y_axis_label_bw <- ggdraw() +
+  draw_label("Density", angle = 90, hjust = 0.5, size = 20)
+
+BRFSS_BW_only_labeled_a80 <- plot_grid(
+  y_axis_label_bw,
+  BRFSS_BW_only_a80,
+  ncol = 2,
+  rel_widths = c(0.04, 1)
+)
+
+BRFSS_BW_only_labeled_a80
+
+ggsave(
+  filename = "BRFSS_BW.png",
+  plot = BRFSS_BW_only_labeled_a80,
+  width = 1500 / 100,
+  height = 800 / 100,
   dpi = 300,
   bg = "white"
 )
@@ -4813,4 +4857,3 @@ This line saves the entire R workspace, including all current objects (data, fun
 ```{r}
 save.image("backup_WS.RData")
 ```
-

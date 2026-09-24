@@ -1,13 +1,14 @@
-# Smoking History Generator Accuracy and Equity Code Archive
+# Smoking History Generator Accuracy and Equity Research Archive
 
 Hesam Mahmoudi  
 Lung Cancer Policy Team (LCP)  
 MGB Center for Health Technology Assessment (CHTA)  
 Massachusetts General Hospital (MGH)  
 Harvard Medical School  
-Prepared: 2026-05-04
+Prepared: 2026-05-04  
+Updated: 2026-09-24
 
-This folder contains the code files prepared for public sharing alongside the manuscript appendix. The archived code evaluates the accuracy of Smoking History Generator-simulated smoking histories, their implications for lung cancer screening eligibility, and related equity concerns across SCCS, MECS, and BRFSS.
+This folder contains the analytic code and literature inventory prepared for public sharing alongside the manuscript appendix. The archived code evaluates the accuracy of Smoking History Generator-simulated smoking histories, their implications for lung cancer screening eligibility, and related equity concerns across SCCS, MECS, and BRFSS. The literature inventory documents peer-reviewed publications that used the National Cancer Institute Smoking History Generator (SHG), its outputs, or an explicit adaptation or derivative of its methods.
 
 Included files:
 
@@ -15,6 +16,8 @@ Included files:
 - `SHG MECS.Rmd`
 - `SHG BRFSS.Rmd`
 - `shg_aggr_results.py`
+- `SHG_literature_inventory_2026.xlsx`
+- `SHG_literature_inventory_2026.csv`
 
 ## Scope
 
@@ -25,6 +28,25 @@ The three R Markdown files contain the cohort-specific analysis code for:
 - BRFSS
 
 The Python file contains the aggregate post-processing code that combines completed cohort-level exports into manuscript-ready summary tables and figures aligned with the manuscript's cross-cohort accuracy and screening-eligibility analyses.
+
+## SHG Literature Inventory
+
+The literature inventory contains 143 unique peer-reviewed publications identified through September 2026. Publications are ordered by year and include the following fields:
+
+- row number
+- author(s)
+- publication year
+- full title
+- journal
+- DOI, when available
+- SHG engagement classification
+- paper-specific justification for inclusion
+
+The inventory covers complementary publication pools, including citations to foundational SHG methods and input-development papers; applications from CISNET lung cancer modeling groups and established CISNET model families; publications by investigators associated with these models; subgroup, state, and regional extensions; international adaptations; tobacco-control and smoking-and-vaping models derived from SHG inputs or methods; and applications outside lung cancer. Publications that only cited or discussed SHG without using its methods, inputs, outputs, or documented model lineage were excluded.
+
+The `SHG engagement` field describes the primary form of connection to SHG. It distinguishes direct use in an analysis; use of SHG-derived histories, transition rates, intensity distributions, mortality inputs, or calibration inputs; use through a documented CISNET model lineage; development or synthesis of the SHG framework and inputs; geographic or population-specific adaptations; explicit reimplementations; and derivative population or tobacco-policy models. This classification is descriptive and is not a rating of study quality.
+
+`SHG_literature_inventory_2026.xlsx` is the formatted version of the inventory. `SHG_literature_inventory_2026.csv` contains the same publication-level fields in a machine-readable format that can be viewed and searched directly on GitHub.
 
 ## Aggregate Script
 
@@ -46,7 +68,7 @@ The following materials are required to run the full workflows but are not inclu
 
 - SHG simulator source, binaries, and auxiliary input files
 - restricted cohort data files
-- intermediate cohort-generated CSV, HTML, image, and workbook outputs
+- intermediate cohort-generated CSV, HTML, image, and analysis-workbook outputs
 
 ## Cohort-Specific Requirements
 
